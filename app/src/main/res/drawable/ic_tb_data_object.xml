@@ -1,0 +1,15 @@
+<!-- Material Symbols Outlined「data_object」24px（Apache-2.0，fonts.google.com/icons）
+     viewBox 0 -960 960 960 → 以 group translateY 平移進 0..960 viewport
+     — 工具列「符號鍵盤」鍵（直接切換至 #+= 符號頁） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M280-160q-66 0-113-47t-47-113v-100q0-33-23.5-56.5T40-500v-40q33 0 56.5-23.5T120-620v-100q0-66 47-113t113-47h80v80h-80q-33 0-56.5 23.5T200-720v100q0 51-28 90t-72 50q44 11 72 50t28 90v100q0 33 23.5 56.5T280-240h80v80h-80Zm320 0v-80h80q33 0 56.5-23.5T760-320v-100q0-51 28-90t72-50q-44-11-72-50t-28-90v-100q0-33-23.5-56.5T680-800h-80v-80h80q66 0 113 47t47 113v100q0 33 23.5 56.5T920-540v40q-33 0-56.5 23.5T840-420v100q0 66-47 113t-113 47h-80Z"/>
+    </group>
+</vector>
+

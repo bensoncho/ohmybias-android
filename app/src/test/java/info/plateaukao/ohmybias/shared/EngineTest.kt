@@ -262,16 +262,16 @@ class InputEngineTest {
         assertEquals("「」 pair", "「" to "」", mock.commitPairs.last())
     }
 
-    /// 符號鍵不經組字流程，改問 pairedRight —— 半形括號/雙引號也要配，單引號不配
+    /// 符號鍵不經組字流程，改問 pairedRight —— 僅中文成對標點配對，半形括號/引號不配
     @Test
     fun pairedRightForSymbolKeys() {
         val (engine, _) = makeEngine()
         assertEquals("（ pairs", "）", engine.pairedRight("（"))
         assertEquals("【 pairs", "】", engine.pairedRight("【"))
-        assertEquals("half-width ( pairs", ")", engine.pairedRight("("))
-        assertEquals("half-width [ pairs", "]", engine.pairedRight("["))
-        assertEquals("half-width { pairs", "}", engine.pairedRight("{"))
-        assertEquals("double quote pairs", "\"", engine.pairedRight("\""))
+        assertEquals("half-width ( does not pair", null, engine.pairedRight("("))
+        assertEquals("half-width [ does not pair", null, engine.pairedRight("["))
+        assertEquals("half-width { does not pair", null, engine.pairedRight("{"))
+        assertEquals("double quote does not pair", null, engine.pairedRight("\""))
         assertEquals("single quote does not pair", null, engine.pairedRight("'"))
         assertEquals("right half does not pair", null, engine.pairedRight("）"))
         assertEquals("multi-char does not pair", null, engine.pairedRight("（）"))

@@ -107,11 +107,8 @@ class InputEngine(
             "ㄚ", "ㄛ", "ㄜ", "ㄝ", "ㄞ", "ㄟ", "ㄠ", "ㄡ", "ㄢ", "ㄣ", "ㄤ", "ㄥ", "ㄦ",
         )
 
-        /// 半形括號/雙引號也配對（打程式碼、英文括號用）— 單引號刻意不配，
-        /// 英文縮寫（don't）與所有格（Daniel's）會被誤補成 don''t
         private val punctuationPairs: Map<String, String> = mapOf(
             "「" to "」", "（" to "）", "『" to "』", "【" to "】", "《" to "》", "〈" to "〉",
-            "(" to ")", "[" to "]", "{" to "}", "\"" to "\"",
         )
 
         private val sentenceEnders: Set<String> = setOf("。", "！", "？", ".", "!", "?", "\n", "；", ";")

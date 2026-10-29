@@ -31,7 +31,7 @@ object ToolbarItems {
 
     /// 設定頁可選的按鈕（順序同鍵盤外觀編輯器 ohmybias-skin 的 TOOLBAR_ITEMS）。
     /// 29/30 是 9/7 的同義備用 ID，不入選單；皮膚帶進來的仍照常顯示與運作。
-    val selectable: List<Int> = listOf(PLACEHOLDER, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 26, 27, 32, 33)
+    val selectable: List<Int> = listOf(PLACEHOLDER, 1, 2, 3, 4, 5, 7, 8, 9, 34, 10, 11, 12, 13, 14, 15, 16, 17, 26, 27, 32, 33)
 
     fun item(id: Int): Item? = when (id) {
         1 -> Item(id, "設", "設定", KeyAction.OpenSettings, iconRes = R.drawable.ic_tb_settings)
@@ -63,6 +63,8 @@ object ToolbarItems {
         // 33 = 浮動鍵盤開關：浮動中顯示「停回底部」圖示，否則「浮出」圖示（切換時整組 view 重建）
         33 -> Item(id, "", "浮動鍵盤", KeyAction.ToggleFloatingKeyboard,
             iconRes = if (Prefs.floatingKeyboard) R.drawable.ic_tb_dock_to_bottom else R.drawable.ic_tb_pip)
+        // 34 = 符號鍵盤（直接切換至 #+= 符號頁，再按一次切回原頁）
+        34 -> Item(id, "#+=", "符號鍵盤", KeyAction.ToggleToolbarPage(KeyboardView.PageKind.SYMBOLS), iconRes = R.drawable.ic_tb_data_object)
         else -> null
     }
 

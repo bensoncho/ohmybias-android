@@ -1,4 +1,5 @@
-0.6.2 — snappier & adjustable haptics, roomier settings
-• Key vibration now fires the moment your finger touches down, not on release (#4)
-• New "Vibration strength" slider in Settings: 0 = system default, slide right for a stronger buzz
-• Settings toggles spaced further apart with larger touch targets to avoid mis-taps
+0.6.3 — Symbol keyboard toolbar shortcut & half-width symbols
+• New "Symbol keyboard" ({ }) button in Custom Toolbar: jump straight to the #+= symbols page
+• #+= symbol page now uses half-width ASCII symbols ([ ] { } # % ^ * + = _ \ | ~ < > &) while keeping CJK brackets
+• Half-width brackets/quotes (( [ { ") no longer auto-pair; auto-pairing applies only to CJK brackets
+• User phrases backup export & import (#5)

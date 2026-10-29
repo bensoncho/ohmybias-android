@@ -460,10 +460,10 @@ class KeyboardView(context: Context) : ViewGroup(context) {
         )
     }
 
-    /// 全形符號頁（#+= 第二頁）
+    /// 符號頁（#+= 第二頁）
     private fun symbolRows(): List<List<KeySpec>> {
-        val r1 = listOf("［", "］", "｛", "｝", "＃", "％", "＾", "＊", "＋", "＝")
-        val r2 = listOf("＿", "＼", "｜", "～", "＜", "＞", "《", "》", "€", "＆")
+        val r1 = listOf("[", "]", "{", "}", "#", "%", "^", "*", "+", "=")
+        val r2 = listOf("_", "\\", "|", "~", "<", ">", "《", "》", "€", "&")
         val r3 = listOf("『", "』", "【", "】", "〈", "〉", "・", "§")
         val row3 = mutableListOf(KeySpec("123", KeyAction.Page(PageKind.NUMBERS), widthMultiplier = 1.4f, isSpecial = true))
         row3 += r3.map { KeySpec(it, KeyAction.Symbol(it)) }
