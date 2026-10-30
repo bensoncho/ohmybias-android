@@ -214,8 +214,8 @@ class KeyboardView(context: Context) : ViewGroup(context) {
         val gap = Prefs.keySpacingScale
         laidOutSpacingScale = gap
         val padTop = dp(6f * gap); val padBottom = dp(6f * gap); val padSide = dp(3f * gap)
-        // 排距與鍵距相同（5dp）— 上下與左右的鍵縫等寬，鍵陣看起來才是均勻的格子
-        val keySpacing = dp(5f * gap); val rowSpacing = keySpacing
+        // 左右鍵距 5dp、上下排距 7.5dp — 讓各橫排之間保有適度呼吸空間
+        val keySpacing = dp(5f * gap); val rowSpacing = dp(7.5f * gap)
         val rowCount = rowsOfButtons.size
         val rowHeight = (h - padTop - padBottom - rowSpacing * (rowCount - 1)) / rowCount
         val innerW = w - padSide * 2
@@ -231,8 +231,8 @@ class KeyboardView(context: Context) : ViewGroup(context) {
             val widths = FloatArray(n)
             var startX = padSide
 
-            if (currentPage == PageKind.LETTERS && rowIndex == 1 && prevUnitWidth > 0f) {
-                // 第二列（a–l）：同首列鍵寬、整列置中
+            if (currentPage == PageKind.LETTERS && n == 9 && prevUnitWidth > 0f) {
+                // a–l 列（9 鍵）：同首列鍵寬、整列置中
                 for (i in 0 until n) widths[i] = prevUnitWidth
                 val total = prevUnitWidth * n + spacingTotal
                 startX = padSide + (innerW - total) / 2
@@ -384,6 +384,7 @@ class KeyboardView(context: Context) : ViewGroup(context) {
 
     private fun letterRows(): List<List<KeySpec>> {
         val skin = SkinSettings.shared
+        val r0 = "1234567890".map { KeySpec(it.toString(), KeyAction.Symbol(it.toString())) }
         val r1 = "qwertyuiop".map { it.toString() }
         val r2 = "asdfghjkl".map { it.toString() }
         val r3 = "zxcvbnm".map { it.toString() }
@@ -435,7 +436,7 @@ class KeyboardView(context: Context) : ViewGroup(context) {
             swipeUp = swipeEntry(SwipeData.Entry("ㄅ", KeyAction.EnterZhuyin), up = true),
             swipeDown = swipeEntry(SwipeData.Entry(null, KeyAction.Newline), up = false)))
 
-        return listOf(r1.map(::key), r2.map(::key), row3, row4)
+        return listOf(r0, r1.map(::key), r2.map(::key), row3, row4)
     }
 
     /// Row 數字/半形符號頁（sweetlime symbolic_row）：數字列＋常用半形符號、大空白

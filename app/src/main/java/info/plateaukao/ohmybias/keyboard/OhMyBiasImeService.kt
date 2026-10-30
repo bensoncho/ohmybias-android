@@ -161,7 +161,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         setInputView(onCreateInputView())
         // 新建的 KeyboardView 用預設 Enter 標籤／🌐 鍵狀態 — 補回目前欄位的值
         keyboardView?.syncSessionState(
-            shouldOfferSwitching() && !Prefs.hideGlobeKey,
+            !Prefs.hideGlobeKey,
             returnLabel(currentInputEditorInfo),
         )
         refreshIdleBar()
@@ -534,7 +534,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
 
     private fun keyboardBodyHeight(): Int {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val base = if (landscape) 180f else 224f
+        val base = if (landscape) 200f else 250f
         return dp(base * Prefs.keyboardHeightScale)
     }
 
@@ -566,7 +566,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         forcedEnglishForField = isPasswordField(info)
         engine.setEnglishMode(if (forcedEnglishForField) true else Prefs.lastEnglishMode)
         keyboardView?.isEnglishMode = engine.isEnglishMode
-        keyboardView?.syncSessionState(shouldOfferSwitching() && !Prefs.hideGlobeKey, returnLabel(info))
+        keyboardView?.syncSessionState(!Prefs.hideGlobeKey, returnLabel(info))
         keyboardView?.syncSpacingIfNeeded()
         refreshIdleBar()
         syncPageWithEngine()
@@ -700,12 +700,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(intent)
             }
-            is KeyAction.Globe -> {
-                if (!switchToNextIme()) {
-                    (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
-                        .showInputMethodPicker()
-                }
-            }
+            is KeyAction.Globe -> applyLanguageToggle()
             is KeyAction.ShowImePicker -> {
                 (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
                     .showInputMethodPicker()
@@ -755,8 +750,10 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         updateBarModeBody()
     }
 
-    /// 中英切換（工具列米/英、空白鍵上滑、實體鍵盤單按 Shift 共用）
+    /// 中英切換（工具列米/英、地球鍵 🌐、空白鍵上滑、實體鍵盤單按 Shift 共用）
     private fun applyLanguageToggle() {
+        if (engine.composing.isNotEmpty()) engine.handleEscape()
+        if (showingSuggestions) clearSuggestions()
         engine.toggleEnglishMode()
         keyboardView?.isEnglishMode = engine.isEnglishMode
         keyboardView?.showPage(KeyboardView.PageKind.LETTERS)  // 從工具列切換時回到字母頁
