@@ -1,6 +1,5 @@
-0.6.3 — Top number row, Globe C/E toggle, Symbol keyboard shortcut & half-width symbols
+0.6.3 — Top number row, refined bottom row & custom toolbar buttons
 • Added a dedicated top number row (1–9, 0) on the letter keyboard with refined row spacing
-• Globe key (🌐) now toggles directly between Boshiamy and English input modes
-• New "Symbol keyboard" ({ }) button in Custom Toolbar: jump straight to the #+= symbols page
+• Spacebar displays "繁體中文 / space"; bottom-left key shows "123" in Chinese mode and "中" in English mode
+• Added "Switch IME" (Globe) and "Symbol keyboard" ({ }) buttons to Custom Toolbar; language button displays "中/英"
 • #+= symbol page uses half-width ASCII symbols without auto-pairing; CJK brackets preserved
-• User phrases backup export & import (#5)

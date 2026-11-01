@@ -167,8 +167,6 @@ class MainActivity : Activity() {
         })
         root.addView(hapSeek, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(toggle("米模式字母鍵顯示大寫", Prefs.uppercaseLettersInChinese) { Prefs.uppercaseLettersInChinese = it })
-        root.addView(toggle("隱藏 🌐 鍵（空白鍵加寬）", Prefs.hideGlobeKey) { Prefs.hideGlobeKey = it })
-        root.addView(footnote("隱藏後長按工具列「米/英」可開輸入法選單"))
         root.addView(toggle("組字候選時保留工具列", Prefs.keepToolbarWithCandidates) { Prefs.keepToolbarWithCandidates = it })
         root.addView(footnote("候選列覆蓋在工具列上（同聯想列），右側固定留一顆鍵可點"))
         root.addView(toggle("同音字含罕見讀音", Prefs.homophoneMultiReading) { Prefs.homophoneMultiReading = it })
@@ -505,12 +503,12 @@ class MainActivity : Activity() {
         return box
     }
 
-    /// 版本列（最底部）：vX.Y.Z © Daniel Kao，置中、次要色
+    /// 版本列（最底部）：vX.Y.Z © Optimized by Benson，置中、次要色
     private fun versionFootnote(): TextView {
         val name = try {
             packageManager.getPackageInfo(packageName, 0).versionName
         } catch (e: Exception) { null } ?: ""
-        val t = footnote("v$name © Daniel Kao")
+        val t = footnote("v$name © Optimized by Benson")
         t.gravity = Gravity.CENTER
         t.setPadding(0, dp(28f), 0, dp(8f))
         return t

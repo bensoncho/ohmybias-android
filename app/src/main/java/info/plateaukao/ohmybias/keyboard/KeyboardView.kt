@@ -410,21 +410,19 @@ class KeyboardView(context: Context) : ViewGroup(context) {
         // 底列（sweetlime）：[123] [🌐] [,] [大空白] [.] [⏎]
         // 工具列已有 123（按鈕 ID 9/29）時省略底列 123 鍵，寬度讓給空白鍵
         // 空白鍵永遠優先：逗號句號固定標準鍵寬，不採用皮膚 spaceKeyLayout 的放大值
-        val show123Key = skin.toolbarButtons.none { it == 9 || it == 29 }
         val numericPage = if (skin.keyboardLayout == "row") PageKind.NUMBERS else PageKind.NUMERIC9
         val row4 = mutableListOf<KeySpec>()
-        if (show123Key) {
-            row4.add(KeySpec("123", KeyAction.Page(numericPage), isSpecial = true))
-        }
-        if (needsInputModeSwitchKey) {
-            row4.add(KeySpec("🌐", KeyAction.Globe, widthMultiplier = 1.0f, isSpecial = true, isGlobe = true))
+        if (isEnglishMode) {
+            row4.add(KeySpec("中", KeyAction.ToggleLanguage, widthMultiplier = 1.0f, isSpecial = false))
+        } else {
+            row4.add(KeySpec("123", KeyAction.Page(numericPage), widthMultiplier = 1.0f, isSpecial = false))
         }
         row4.add(KeySpec(",", KeyAction.Letter(","),
             swipeUp = swipeEntry(SwipeData.up[","], up = true),
             swipeDown = swipeEntry(SwipeData.down[","], up = false),
             longPress = if (skin.longPressEnabled) LongPressData.commaMenu else null))
         // 空白鍵手勢：上滑＝中↔英、右上滑＝注音查碼、左上滑＝同音字、左右拖曳＝移動游標
-        row4.add(KeySpec("", KeyAction.Space,
+        row4.add(KeySpec(if (isEnglishMode) "space" else "繁體中文", KeyAction.Space,
             swipeUp = swipeEntry(SwipeData.Entry(null, KeyAction.ToggleLanguage), up = true),
             swipeUpLeft = swipeEntry(SwipeData.Entry(null, KeyAction.EnterHomophone), up = true),
             swipeUpRight = swipeEntry(SwipeData.Entry(null, KeyAction.EnterZhuyin), up = true)))

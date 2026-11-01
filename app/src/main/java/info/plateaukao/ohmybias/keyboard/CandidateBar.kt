@@ -44,9 +44,9 @@ class CandidateBar(context: Context) : FrameLayout(context) {
     private val overflowHint = TextView(context)
     private var languageButton: TextView? = null
 
-    /// 語言鍵顯示目前輸入法：嘸蝦米 →「米」、英文 →「英」
+    /// 語言鍵顯示目前輸入法：嘸蝦米 →「中」、英文 →「英」
     fun setEnglishMode(isEnglish: Boolean) {
-        languageButton?.text = if (isEnglish) "英" else "米"
+        languageButton?.text = if (isEnglish) "英" else "中"
     }
 
     /// 上次顯示內容 — 相同就完全不動（IME 每個按鍵/每次切輸入框都會重設候選列）

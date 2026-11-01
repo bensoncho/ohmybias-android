@@ -161,7 +161,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         setInputView(onCreateInputView())
         // 新建的 KeyboardView 用預設 Enter 標籤／🌐 鍵狀態 — 補回目前欄位的值
         keyboardView?.syncSessionState(
-            !Prefs.hideGlobeKey,
+            shouldOfferSwitching(),
             returnLabel(currentInputEditorInfo),
         )
         refreshIdleBar()
@@ -307,7 +307,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         if (showingSuggestions) clearSuggestions()
         applyLanguageToggle()
         // 浮動模式沒有工具列的米/英可看 — 提示一下切到哪
-        if (builtHwMode == HwMode.FLOATING) showToast(if (engine.isEnglishMode) "英" else "米", 0.8)
+        if (builtHwMode == HwMode.FLOATING) showToast(if (engine.isEnglishMode) "英" else "中", 0.8)
     }
     override fun ensureShown() {
         if (!isInputViewShown) requestShowSelf(0)
@@ -566,7 +566,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         forcedEnglishForField = isPasswordField(info)
         engine.setEnglishMode(if (forcedEnglishForField) true else Prefs.lastEnglishMode)
         keyboardView?.isEnglishMode = engine.isEnglishMode
-        keyboardView?.syncSessionState(!Prefs.hideGlobeKey, returnLabel(info))
+        keyboardView?.syncSessionState(shouldOfferSwitching(), returnLabel(info))
         keyboardView?.syncSpacingIfNeeded()
         refreshIdleBar()
         syncPageWithEngine()
@@ -700,7 +700,12 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(intent)
             }
-            is KeyAction.Globe -> applyLanguageToggle()
+            is KeyAction.Globe -> {
+                if (!switchToNextIme()) {
+                    (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                        .showInputMethodPicker()
+                }
+            }
             is KeyAction.ShowImePicker -> {
                 (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
                     .showInputMethodPicker()
