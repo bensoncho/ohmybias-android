@@ -72,11 +72,13 @@ class MainActivity : Activity() {
         root.addView(sectionTitle("字表"))
         tableStatus = footnote("")
         root.addView(tableStatus)
+        root.addView(footnote("支援 .cin 或官方 Windows 嘸蝦米 liu-uni*.tab（可一次多選 liu-uni ~ liu-uni4.tab 自動合併去重）"))
         root.addView(buttonFlow(
-            "匯入 liu.cin" to {
+            "匯入 liu.cin / .tab" to {
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
                 intent.addCategory(Intent.CATEGORY_OPENABLE)
                 intent.type = "*/*"
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                 startActivityForResult(intent, pickCinRequest)
             },
         ))
@@ -530,20 +532,51 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
+        if (resultCode != RESULT_OK || data == null) return
         when (requestCode) {
-            pickCinRequest -> handleCinImport(uri)
-            pickSkinRequest -> handleSkinImport(uri)
+            pickCinRequest -> {
+                val uris = extractUris(data)
+                if (uris.isNotEmpty()) handleCinImport(uris)
+            }
+            pickSkinRequest -> {
+                val uri = data.data ?: extractUris(data).firstOrNull() ?: return
+                handleSkinImport(uri)
+            }
         }
     }
 
-    /// liu.cin 動輒數 MB，來源又可能是雲端硬碟（下載時間不定）—— 複製＋編譯全放背景執行緒，
+    private fun extractUris(data: Intent): List<Uri> {
+        val list = mutableListOf<Uri>()
+        val clip = data.clipData
+        if (clip != null) {
+            for (i in 0 until clip.itemCount) {
+                clip.getItemAt(i)?.uri?.let { list.add(it) }
+            }
+        }
+        if (list.isEmpty()) {
+            data.data?.let { list.add(it) }
+        }
+        return list
+    }
+
+    private fun queryDisplayName(uri: Uri): String {
+        try {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val name = c.getString(0)
+                    if (!name.isNullOrEmpty()) return name
+                }
+            }
+        } catch (_: Exception) {}
+        return uri.lastPathSegment?.substringAfterLast('/') ?: ""
+    }
+
+    /// liu.cin / liu-uni*.tab 動輒數 MB，來源又可能是雲端硬碟（下載時間不定）—— 複製＋編譯全放背景執行緒，
     /// 免得主執行緒卡到 ANR。
-    private fun handleCinImport(uri: Uri) {
+    private fun handleCinImport(uris: List<Uri>) {
         importMessage.text = "匯入中…"
         Thread({
-            val message = importCin(uri)
+            val message = importCin(uris)
             runOnUiThread {
                 importMessage.text = message
                 refreshTableStatus()
@@ -552,31 +585,43 @@ class MainActivity : Activity() {
     }
 
     /// 全程寫暫存檔、成功才 rename 就位：
-    /// - 中途失敗（來源讀到一半斷線、不是有效 .cin）不會動到現有字表；
+    /// - 支援單檔或多檔（.cin 與官方 Windows 嘸蝦米 liu-uni*.tab），自動辨識繁/簡/台式簡/日文表並產出對應模式字表；
+    /// - 中途失敗（來源讀到一半斷線、不是有效 .cin / .tab）不會動到現有字表；
     /// - rename 不影響鍵盤已 mmap 的舊 liu.bin —— 舊 inode 活到它重載為止，
     ///   不會讀到寫一半的內容，檔案變短也不會 SIGBUS。
-    private fun importCin(uri: Uri): String {
-        val cin = File(AppEnv.cinPath)
-        val bin = File(AppEnv.sharedDir, "liu.bin")
-        val cinTmp = File(cin.path + ".tmp")
-        val binTmp = File(bin.path + ".tmp")
+    private fun importCin(uris: List<Uri>): String {
         try {
-            contentResolver.openInputStream(uri)?.use { input ->
-                cinTmp.outputStream().use { input.copyTo(it) }
-            } ?: return "讀取失敗"
-            val count = CINCompiler.compile(cinTmp.path, binTmp.path)
-            if (count <= 0) return "編譯失敗 — 請確認是有效的 .cin 檔"
-            // bin 是實際被查的檔，最後才就位 = 整個匯入的提交點
-            if (!cinTmp.renameTo(cin) || !binTmp.renameTo(bin)) return "寫入失敗 — 儲存空間可能不足"
+            val sortedUris = uris.mapIndexed { idx, uri ->
+                val name = queryDisplayName(uri)
+                val stem = name.substringBeforeLast('.').lowercase()
+                Triple(stem, idx, uri to name)
+            }.sortedWith(compareBy<Triple<String, Int, Pair<Uri, String>>> { it.first }.thenBy { it.second })
+                .map { it.third }
+
+            val namedSources = ArrayList<Pair<String, ByteArray>>(sortedUris.size)
+            for ((uri, name) in sortedUris) {
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: return "讀取失敗"
+                namedSources.add(name to bytes)
+            }
+            val count = CINCompiler.importSources(namedSources, AppEnv.sharedDir, AppEnv.cinPath)
+            if (count == 0) {
+                return "編譯失敗 — 請確認是有效的 .cin 或 liu-uni*.tab 檔"
+            }
+            if (count < 0) {
+                return "寫入失敗 — 儲存空間可能不足"
+            }
             CINTable.bumpGeneration()  // 鍵盤同 process — 下次進輸入框自動重載
             // 字表到手就回嘸蝦米 — 匯入前打不出中文而切去的英文模式不該延續到有字表之後
             // （onStartInput 每次都重讀 lastEnglishMode，下次進輸入框即生效）
             Prefs.resetToChineseMode()
-            return "已編譯 $count 個字碼"
+            return if (sortedUris.size > 1) {
+                "已合併 ${sortedUris.size} 個檔案並編譯 $count 個字碼（各輸入模式排序已分別建立）"
+            } else {
+                "已編譯 $count 個字碼"
+            }
         } catch (e: Exception) {
             return "匯入失敗：${e.message}"
-        } finally {
-            cinTmp.delete(); binTmp.delete()
         }
     }
 
@@ -650,7 +695,7 @@ class MainActivity : Activity() {
         val table = CINTable()
         table.reload()
         tableStatus.text = if (table.isEmpty) {
-            "尚未匯入 liu.cin — 鍵盤無法輸出中文"
+            "尚未匯入字表 — 鍵盤無法輸出中文"
         } else {
             val name = table.cinName.ifEmpty { "字表" }
             "已載入：$name（最長碼 ${table.maxCodeLength}）"

@@ -80,16 +80,24 @@ class CandidateRanker(
                     val s = t2s[ch] ?: return@filter true
                     s == ch
                 }
+                // 若尚未匯入獨立的簡體字表（liu-s.bin），主字表為繁體排序（如 qd: 1.替 2.体、tua: 1.杈 2.树），
+                // 將專屬於簡體的字（s2t 有對應繁體字者，如「体→體」「树→樹」）排在繁簡共用字前面
+                if (!cinTable.hasModeTable(InputEngine.InputMode.S) && candidates.size > 1) {
+                    val s2t = cinTable.s2t
+                    if (s2t.isNotEmpty()) {
+                        val simpOnly = ArrayList<String>(candidates.size)
+                        val shared = ArrayList<String>(candidates.size)
+                        for (ch in candidates) {
+                            val t = s2t[ch]
+                            if (t != null && t != ch) simpOnly.add(ch) else shared.add(ch)
+                        }
+                        if (simpOnly.isNotEmpty() && shared.isNotEmpty()) {
+                            candidates = simpOnly + shared
+                        }
+                    }
+                }
             }
             InputEngine.InputMode.T, InputEngine.InputMode.J -> {}
-        }
-
-        // 領域感知重排（穩定：加分相同時保持原順序）
-        if (prefs.suggestStrategy == "domain" && domainHits.isNotEmpty() && candidates.size > 1) {
-            val indexed = candidates.withIndex().toList()
-            candidates = indexed.sortedWith(compareByDescending<IndexedValue<String>> {
-                domainBoost(it.value)
-            }.thenBy { it.index }).map { it.value }
         }
 
         // 地區用詞：對側地區詞降到最後
@@ -136,7 +144,11 @@ class CandidateRanker(
         }
     }
 
-    fun fuzzyLookup(code: String, cinTable: CINTable): List<String> {
+    fun fuzzyLookup(
+        code: String,
+        cinTable: CINTable,
+        mode: InputEngine.InputMode = InputEngine.InputMode.T,
+    ): List<String> {
         val seen = HashSet<String>()
         val results = ArrayList<String>()
         val chars = code.toCharArray()
@@ -145,7 +157,7 @@ class CandidateRanker(
             for (neighbor in neighbors) {
                 val variant = chars.copyOf()
                 variant[i] = neighbor
-                for (ch in cinTable.lookup(String(variant))) {
+                for (ch in cinTable.lookup(String(variant), mode)) {
                     if (seen.add(ch)) results.add(ch)
                 }
             }

@@ -186,7 +186,7 @@ class InputEngine(
         // Pin 模式：字母鍵累積要固定的碼
         if (_isPinMode) {
             _pinCode += char; _composing = "PIN:$_pinCode"
-            _currentCandidates = cinTable.lookup(_pinCode)
+            _currentCandidates = cinTable.lookup(_pinCode, _inputMode)
             notifyComposing(); notifyCandidates(); return@sync
         }
 
@@ -298,7 +298,7 @@ class InputEngine(
                     delegate?.engineDidClearComposing()
                 } else {
                     _composing = "PIN:$_pinCode"
-                    _currentCandidates = cinTable.lookup(_pinCode)
+                    _currentCandidates = cinTable.lookup(_pinCode, _inputMode)
                     notifyComposing(); notifyCandidates()
                 }
             } else {
@@ -369,7 +369,7 @@ class InputEngine(
     fun handleWildcard(): Unit = sync {
         if (_composing.isEmpty()) return@sync
         _composing += "*"; _isWildcard = true
-        _currentCandidates = cinTable.wildcardLookup(_composing)
+        _currentCandidates = cinTable.wildcardLookup(_composing, _inputMode)
         notifyComposing(); notifyCandidates()
     }
 
@@ -428,7 +428,7 @@ class InputEngine(
     fun handleVRSF(char: String): Boolean = sync {
         val map = listOf("v" to 1, "r" to 2, "s" to 3, "f" to 4)
         for ((letter, idx) in map) {
-            if (char == letter && _currentCandidates.size > idx && !cinTable.hasPrefix(_composing + letter)) {
+            if (char == letter && _currentCandidates.size > idx && !cinTable.hasPrefix(_composing + letter, _inputMode)) {
                 commitText(_currentCandidates[idx]); return@sync true
             }
         }
@@ -794,20 +794,32 @@ class InputEngine(
 
     // MARK: - Internal
 
-    private fun canExtendCode(code: String): Boolean = cinTable.validNextKeys(code).isNotEmpty()
+    private fun canExtendCode(code: String): Boolean = cinTable.validNextKeys(code, _inputMode).isNotEmpty()
 
     fun validNextKeys(): Set<Char> = sync {
         if (_composing.isEmpty()) return@sync emptySet()
-        cinTable.validNextKeys(_composing)
+        cinTable.validNextKeys(_composing, _inputMode)
     }
 
     private fun refreshCandidates() {
         val code = _composing
         if (_inputMode == InputMode.J) {
-            _currentCandidates = cinTable.lookup("$code,") + cinTable.lookup("$code.")
+            val kana = cinTable.lookup("$code,", InputMode.J) + cinTable.lookup("$code.", InputMode.J)
+            if (cinTable.hasModeTable(InputMode.J)) {
+                val base = if (_isWildcard) cinTable.wildcardLookup(code, InputMode.J)
+                           else cinTable.lookup(code, InputMode.J)
+                val seen = HashSet<String>()
+                val merged = ArrayList<String>(base.size + kana.size)
+                for (ch in base) if (seen.add(ch)) merged.add(ch)
+                for (ch in kana) if (seen.add(ch)) merged.add(ch)
+                _currentCandidates = ranker.rank(merged, code, InputMode.J, cinTable, pinnedOrder)
+            } else {
+                _currentCandidates = kana
+            }
             return
         }
-        val raw = if (_isWildcard) cinTable.wildcardLookup(code) else cinTable.lookup(code)
+        val raw = if (_isWildcard) cinTable.wildcardLookup(code, _inputMode)
+                  else cinTable.lookup(code, _inputMode)
         _currentCandidates = ranker.rank(raw, code, _inputMode, cinTable, pinnedOrder)
 
         // 常用語自訂組字碼：排在字表候選之後（撞碼時不擠掉原本的字；獨佔碼時就是唯一候選，
@@ -821,7 +833,7 @@ class InputEngine(
 
         // 模糊比對：無候選時嘗試相鄰鍵替換
         if (_currentCandidates.isEmpty() && !_isWildcard && code.length >= 2 && prefs.fuzzyMatch) {
-            _currentCandidates = ranker.fuzzyLookup(code, cinTable)
+            _currentCandidates = ranker.fuzzyLookup(code, cinTable, _inputMode)
         }
     }
 

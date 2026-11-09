@@ -1,5 +1,7 @@
-0.6.3 — Top number row, refined bottom row & custom toolbar buttons
+0.6.3 — Official .tab multi-file import with mode-specific ordering, top number row & toolbar updates
+• Support importing official Windows Boshiamy liu-uni*.tab files (multi-select liu-uni/2/3/4.tab with auto-deduplication and mode-specific candidate ordering for ,,T / ,,S / ,,TS / ,,J)
 • Added a dedicated top number row (1–9, 0) on the letter keyboard with refined row spacing
 • Spacebar displays "繁體中文 / space"; bottom-left key shows "123" in Chinese mode and "中" in English mode
 • Added "Switch IME" (Globe) and "Symbol keyboard" ({ }) buttons to Custom Toolbar; language button displays "中/英"
 • #+= symbol page uses half-width ASCII symbols without auto-pairing; CJK brackets preserved
+• User phrases backup export & import (#5)

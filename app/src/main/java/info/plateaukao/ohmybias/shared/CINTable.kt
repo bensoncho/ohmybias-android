@@ -30,51 +30,17 @@ class CINTable {
 
     // MARK: - 不可變快照
 
-    /// 一份完整的字表。只有載入期間（還沒發佈、只有一條執行緒看得到）才寫欄位，
-    /// 發佈給 [snap] 之後一律只讀 —— 所以下面的查詢方法在任何執行緒上都安全。
-    private class Snap {
-        // mmap 二進位（liu.bin）
+    /// 單一 CINM 二進位字表（支援主字表 liu.bin 以及各模式專屬字表 liu-s.bin / liu-ts.bin / liu-j.bin）
+    private class BinTable {
         var binData: BinData? = null
         var entryCount = 0
         var codesOff = 0
         var valsOff = 0
         var stringsOff = 0
         var charsOff = 0
-
-        /// 已載入 .bin 的 CINM 格式版本（見 CINCompiler.FORMAT_VERSION）
         var binFormatVersion = 0
-
-        // 文字 fallback + overlay（extras — 小型 dict）
-        var overlay: MutableMap<String, MutableList<String>> = HashMap()
-
-        /// 常用語自訂組字碼（UserPhrases）— 與字表分開存：查詢時排在既有候選之後，
-        /// 不參與字頻排序，使用者設了跟字表撞碼的捷徑也不會把原本的字擠掉
-        var shortcuts: Map<String, List<String>> = emptyMap()
-
-        var t2s: Map<String, String> = emptyMap()
-        var s2t: Map<String, String> = emptyMap()
         var selKeys: List<Char> = "1234567890".toList()
         var cinName: String = ""
-        var maxCodeLength: Int = 4
-
-        val isEmpty: Boolean get() = entryCount == 0 && overlay.isEmpty()
-
-        // MARK: 反查建表
-
-        fun buildReverseTable(): Map<String, List<String>> {
-            val r = HashMap<String, MutableList<String>>()
-            val d = binData
-            if (d != null) {
-                for (i in 0 until entryCount) {
-                    val code = readCode(d, i)
-                    for (ch in readChars(d, i)) r.getOrPut(ch) { mutableListOf() }.add(code)
-                }
-            }
-            for ((code, chars) in overlay) for (c in chars) r.getOrPut(c) { mutableListOf() }.add(code)
-            return r
-        }
-
-        // MARK: 二進位 helpers
 
         fun readCode(d: BinData, i: Int): String {
             val off = d.u32(codesOff + i * 6).toInt()
@@ -102,7 +68,7 @@ class CINTable {
             return r
         }
 
-        private fun binSearch(code: String): Int {
+        fun binSearch(code: String): Int {
             val d = binData ?: return -1
             if (entryCount <= 0) return -1
             val target = code.toByteArray(Charsets.UTF_8)
@@ -119,7 +85,7 @@ class CINTable {
             return -1
         }
 
-        private fun lowerBound(prefix: String): Int {
+        fun lowerBound(prefix: String): Int {
             val d = binData ?: return 0
             if (entryCount <= 0) return 0
             val target = prefix.toByteArray(Charsets.UTF_8)
@@ -163,7 +129,7 @@ class CINTable {
             return 0
         }
 
-        private fun codeHasPrefix(d: BinData, i: Int, prefix: ByteArray): Boolean {
+        fun codeHasPrefix(d: BinData, i: Int, prefix: ByteArray): Boolean {
             val idxOff = codesOff + i * 6
             if (idxOff < 0 || idxOff + 6 > d.count) return false
             val off = stringsOff + d.u32(idxOff).toInt()
@@ -176,14 +142,131 @@ class CINTable {
             return true
         }
 
+        fun lookup(c: String): List<String> {
+            val d = binData ?: return emptyList()
+            val idx = binSearch(c)
+            return if (idx >= 0) readChars(d, idx) else emptyList()
+        }
+
+        fun hasPrefix(p: String): Boolean {
+            val d = binData ?: return false
+            val i = lowerBound(p)
+            return i < entryCount && codeHasPrefix(d, i, p.toByteArray(Charsets.UTF_8))
+        }
+
+        fun addValidNextKeys(p: String, out: MutableSet<Char>) {
+            val d = binData ?: return
+            val pBytes = p.toByteArray(Charsets.UTF_8)
+            val pLen = pBytes.size
+            val start = lowerBound(p)
+            for (i in start until entryCount) {
+                if (!codeHasPrefix(d, i, pBytes)) break
+                val codeLen = d.u16(codesOff + i * 6 + 4)
+                if (codeLen > pLen) {
+                    val off = stringsOff + d.u32(codesOff + i * 6).toInt()
+                    if (off + pLen >= d.count) continue
+                    out.add(d.u8(off + pLen).toInt().toChar())
+                }
+            }
+        }
+
+        fun collectWildcard(fix: String, re: Regex, seen: MutableSet<String>, out: MutableList<String>) {
+            val d = binData ?: return
+            val start = if (fix.isEmpty()) 0 else lowerBound(fix)
+            val fixBytes = fix.toByteArray(Charsets.UTF_8)
+            for (i in start until entryCount) {
+                if (fix.isNotEmpty() && !codeHasPrefix(d, i, fixBytes)) break
+                val code = readCode(d, i)
+                if (re.matches(code)) {
+                    for (c in readChars(d, i)) if (seen.add(c)) out.add(c)
+                }
+            }
+        }
+    }
+
+    /// 一份完整的字表。只有載入期間（還沒發佈、只有一條執行緒看得到）才寫欄位，
+    /// 發佈給 [snap] 之後一律只讀 —— 所以下面的查詢方法在任何執行緒上都安全。
+    private class Snap {
+        // mmap 二進位：主字表（liu.bin，對應繁體 ,,T）與各模式專屬字表
+        var mainBin = BinTable()
+        var simpBin: BinTable? = null   // liu-s.bin（,,S 大陸簡體 liu-uni2.tab 優先）
+        var tsBin: BinTable? = null     // liu-ts.bin（,,TS 台式簡體 liu-uni3.tab 優先）
+        var jpBin: BinTable? = null     // liu-j.bin（,,J 日文 liu-uni4.tab 優先）
+
+        // 文字 fallback + overlay（extras — 小型 dict）
+        var overlay: MutableMap<String, MutableList<String>> = HashMap()
+
+        /// 常用語自訂組字碼（UserPhrases）— 與字表分開存：查詢時排在既有候選之後，
+        /// 不參與字頻排序，使用者設了跟字表撞碼的捷徑也不會把原本的字擠掉
+        var shortcuts: Map<String, List<String>> = emptyMap()
+
+        var t2s: Map<String, String> = emptyMap()
+        var s2t: Map<String, String> = emptyMap()
+        var selKeys: List<Char>
+            get() = mainBin.selKeys
+            set(value) { mainBin.selKeys = value }
+        var cinName: String
+            get() = mainBin.cinName
+            set(value) { mainBin.cinName = value }
+        var maxCodeLength: Int = 4
+
+        val entryCount: Int get() = mainBin.entryCount
+        val binFormatVersion: Int get() = mainBin.binFormatVersion
+        val isEmpty: Boolean get() = mainBin.entryCount == 0 && overlay.isEmpty()
+
+        fun binFor(mode: InputEngine.InputMode): BinTable = when (mode) {
+            InputEngine.InputMode.S -> simpBin?.takeIf { it.entryCount > 0 } ?: mainBin
+            InputEngine.InputMode.TS -> tsBin?.takeIf { it.entryCount > 0 } ?: mainBin
+            InputEngine.InputMode.J -> jpBin?.takeIf { it.entryCount > 0 } ?: mainBin
+            else -> mainBin
+        }
+
+        fun hasModeTable(mode: InputEngine.InputMode): Boolean = when (mode) {
+            InputEngine.InputMode.S -> (simpBin?.entryCount ?: 0) > 0
+            InputEngine.InputMode.TS -> (tsBin?.entryCount ?: 0) > 0
+            InputEngine.InputMode.J -> (jpBin?.entryCount ?: 0) > 0
+            else -> mainBin.entryCount > 0
+        }
+
+        // MARK: 反查建表
+
+        fun buildReverseTable(): Map<String, List<String>> {
+            val r = HashMap<String, MutableList<String>>()
+            val seenPerChar = HashMap<String, MutableSet<String>>()
+            fun addFromBin(bt: BinTable?) {
+                val d = bt?.binData ?: return
+                for (i in 0 until bt.entryCount) {
+                    val code = bt.readCode(d, i)
+                    for (ch in bt.readChars(d, i)) {
+                        if (seenPerChar.getOrPut(ch) { HashSet() }.add(code)) {
+                            r.getOrPut(ch) { mutableListOf() }.add(code)
+                        }
+                    }
+                }
+            }
+            addFromBin(mainBin)
+            addFromBin(simpBin)
+            addFromBin(tsBin)
+            addFromBin(jpBin)
+            for ((code, chars) in overlay) {
+                for (c in chars) {
+                    if (seenPerChar.getOrPut(c) { HashSet() }.add(code)) {
+                        r.getOrPut(c) { mutableListOf() }.add(code)
+                    }
+                }
+            }
+            return r
+        }
+
         // MARK: 查詢
 
-        fun lookup(code: String): List<String> {
+        fun lookup(code: String, mode: InputEngine.InputMode = InputEngine.InputMode.T): List<String> {
             val c = code.lowercase()
-            var result: List<String> = emptyList()
-            val idx = binSearch(c)
-            val d = binData
-            if (idx >= 0 && d != null) result = readChars(d, idx)
+            val targetBin = binFor(mode)
+            var result: List<String> = targetBin.lookup(c)
+            if (result.isEmpty() && targetBin !== mainBin) {
+                result = mainBin.lookup(c)
+            }
             overlay[c]?.let { extra -> result = extra + result }
             return result
         }
@@ -191,34 +274,20 @@ class CINTable {
         /// 常用語捷徑 — 不含字表本身的候選（見 [shortcuts]）
         fun shortcutLookup(code: String): List<String> = shortcuts[code.lowercase()] ?: emptyList()
 
-        fun hasPrefix(prefix: String): Boolean {
+        fun hasPrefix(prefix: String, mode: InputEngine.InputMode = InputEngine.InputMode.T): Boolean {
             val p = prefix.lowercase()
-            val d = binData
-            if (d != null) {
-                val i = lowerBound(p)
-                if (i < entryCount && codeHasPrefix(d, i, p.toByteArray(Charsets.UTF_8))) return true
-            }
+            val targetBin = binFor(mode)
+            if (targetBin.hasPrefix(p)) return true
+            if (targetBin !== mainBin && mainBin.hasPrefix(p)) return true
             return overlay.keys.any { it.startsWith(p) } || shortcuts.keys.any { it.startsWith(p) }
         }
 
-        fun validNextKeys(after: String): Set<Char> {
+        fun validNextKeys(after: String, mode: InputEngine.InputMode = InputEngine.InputMode.T): Set<Char> {
             val p = after.lowercase()
             val result = HashSet<Char>()
-            val pBytes = p.toByteArray(Charsets.UTF_8)
-            val pLen = pBytes.size
-            val d = binData
-            if (d != null) {
-                val start = lowerBound(p)
-                for (i in start until entryCount) {
-                    if (!codeHasPrefix(d, i, pBytes)) break
-                    val codeLen = d.u16(codesOff + i * 6 + 4)
-                    if (codeLen > pLen) {
-                        val off = stringsOff + d.u32(codesOff + i * 6).toInt()
-                        if (off + pLen >= d.count) continue
-                        result.add(d.u8(off + pLen).toInt().toChar())
-                    }
-                }
-            }
+            val targetBin = binFor(mode)
+            targetBin.addValidNextKeys(p, result)
+            if (targetBin !== mainBin) mainBin.addValidNextKeys(p, result)
             for (key in overlay.keys) {
                 if (key.startsWith(p) && key.length > p.length) result.add(key[p.length])
             }
@@ -228,9 +297,9 @@ class CINTable {
             return result
         }
 
-        fun wildcardLookup(pattern: String): List<String> {
+        fun wildcardLookup(pattern: String, mode: InputEngine.InputMode = InputEngine.InputMode.T): List<String> {
             val pat = pattern.lowercase()
-            if (!pat.contains("*")) return lookup(pat)
+            if (!pat.contains("*")) return lookup(pat, mode)
             // 逐字元 escape、* → .+（對應 iOS 的 escapedPattern + replacingOccurrences）
             val sb = StringBuilder("^")
             for (ch in pat) {
@@ -243,18 +312,9 @@ class CINTable {
             val fix = pat.takeWhile { it != '*' }
             val results = ArrayList<String>()
             val seen = HashSet<String>()
-            val d = binData
-            if (d != null) {
-                val start = if (fix.isEmpty()) 0 else lowerBound(fix)
-                val fixBytes = fix.toByteArray(Charsets.UTF_8)
-                for (i in start until entryCount) {
-                    if (fix.isNotEmpty() && !codeHasPrefix(d, i, fixBytes)) break
-                    val code = readCode(d, i)
-                    if (re.matches(code)) {
-                        for (c in readChars(d, i)) if (seen.add(c)) results.add(c)
-                    }
-                }
-            }
+            val targetBin = binFor(mode)
+            targetBin.collectWildcard(fix, re, seen, results)
+            if (targetBin !== mainBin) mainBin.collectWildcard(fix, re, seen, results)
             for ((code, chars) in overlay) {
                 if (fix.isNotEmpty() && !code.startsWith(fix)) continue
                 if (re.matches(code)) {
@@ -368,7 +428,7 @@ class CINTable {
 
         // 1. sharedDir 的 mmap 二進位
         val userBin = AppEnv.sharedDir + "/liu.bin"
-        if (File(userBin).exists()) loadBin(userBin, s)
+        if (File(userBin).exists()) loadBin(userBin, s.mainBin)
         // 1b. 舊版編譯器產出的 .bin（格式版本 0）位移只有 u16，大字表尾端讀出來是錯字。
         //     使用者不該為了拿到修正而重新匯入一次 — 手上還有 liu.cin 就直接重編。
         if (s.entryCount > 0 && s.binFormatVersion < CINCompiler.FORMAT_VERSION &&
@@ -376,9 +436,12 @@ class CINTable {
         ) {
             // 編到暫存檔、成功才換掉 — 重編失敗就沿用舊檔（字是舊的錯法，但還能打）
             val tmp = File("$userBin.tmp")
-            if (CINCompiler.compile(AppEnv.cinPath, tmp.path) > 0 && tmp.renameTo(File(userBin))) {
-                s.binData = null; s.entryCount = 0
-                loadBin(userBin, s)
+            val dst = File(userBin)
+            val replaced = CINCompiler.compile(AppEnv.cinPath, tmp.path) > 0 &&
+                (tmp.renameTo(dst) || runCatching { tmp.copyTo(dst, overwrite = true); true }.getOrDefault(false))
+            if (replaced) {
+                s.mainBin = BinTable()
+                loadBin(userBin, s.mainBin)
             }
             tmp.delete()
         }
@@ -387,10 +450,29 @@ class CINTable {
             val cinPath = AppEnv.cinPath
             if (File(cinPath).exists()) {
                 CINCompiler.compile(cinPath, userBin)
-                if (File(userBin).exists()) loadBin(userBin, s)
+                if (File(userBin).exists()) loadBin(userBin, s.mainBin)
                 // 編譯失敗 → 文字 fallback
                 if (s.entryCount == 0) parseCINIntoOverlay(cinPath, s)
             }
+        }
+        // 2b. 各輸入模式專屬 .bin（匯入 liu-uni2/3/4.tab 時產出）
+        val sBinFile = File(AppEnv.sharedDir, "liu-s.bin")
+        if (sBinFile.exists()) {
+            val bt = BinTable()
+            loadBin(sBinFile.path, bt)
+            if (bt.entryCount > 0) s.simpBin = bt
+        }
+        val tsBinFile = File(AppEnv.sharedDir, "liu-ts.bin")
+        if (tsBinFile.exists()) {
+            val bt = BinTable()
+            loadBin(tsBinFile.path, bt)
+            if (bt.entryCount > 0) s.tsBin = bt
+        }
+        val jBinFile = File(AppEnv.sharedDir, "liu-j.bin")
+        if (jBinFile.exists()) {
+            val bt = BinTable()
+            loadBin(jBinFile.path, bt)
+            if (bt.entryCount > 0) s.jpBin = bt
         }
         // 3. Extras
         loadExtras(s)
@@ -407,11 +489,12 @@ class CINTable {
     /// 從 .cin 文字檔載入（先編到暫存 .bin）— 測試與現場使用。
     fun load(cinPath: String) {
         val s = Snap()
-        val tmp = System.getProperty("java.io.tmpdir") + "/cin_" + UUID.randomUUID() + ".bin"
+        val tmpDir = System.getProperty("java.io.tmpdir") ?: "."
+        val tmp = "$tmpDir/cin_${UUID.randomUUID()}.bin"
         CINCompiler.compile(cinPath, tmp)
         val f = File(tmp)
         if (f.exists()) {
-            BinData.of(f)?.let { parseBinData(it, s) }
+            BinData.of(f)?.let { parseBinData(it, s.mainBin) }
             f.delete()
         }
         if (s.entryCount == 0) parseCINIntoOverlay(cinPath, s)
@@ -422,13 +505,17 @@ class CINTable {
 
     private fun recomputeMaxCodeLength(s: Snap) {
         var maxLen = 4
-        val d = s.binData
-        if (d != null) {
-            for (i in 0 until s.entryCount) {
-                val len = d.u16(s.codesOff + i * 6 + 4)
+        fun scanBin(bt: BinTable?) {
+            val d = bt?.binData ?: return
+            for (i in 0 until bt.entryCount) {
+                val len = d.u16(bt.codesOff + i * 6 + 4)
                 if (len > maxLen) maxLen = len
             }
         }
+        scanBin(s.mainBin)
+        scanBin(s.simpBin)
+        scanBin(s.tsBin)
+        scanBin(s.jpBin)
         for (k in s.overlay.keys) if (k.length > maxLen) maxLen = k.length
         for (k in s.shortcuts.keys) if (k.length > maxLen) maxLen = k.length
         s.maxCodeLength = maxLen
@@ -436,31 +523,31 @@ class CINTable {
 
     // MARK: - 二進位載入
 
-    private fun loadBin(path: String, s: Snap) {
+    private fun loadBin(path: String, bt: BinTable) {
         val d = BinData.mapped(path) ?: return
-        parseBinData(d, s)
+        parseBinData(d, bt)
     }
 
-    private fun parseBinData(d: BinData, s: Snap) {
+    private fun parseBinData(d: BinData, bt: BinTable) {
         if (d.count < 128 || d.u8(0) != 0x43 || d.u8(1) != 0x49 || d.u8(2) != 0x4E || d.u8(3) != 0x4D) return
-        s.entryCount = d.u32(4).toInt()
+        bt.entryCount = d.u32(4).toInt()
         val skLen = d.u8(8)
         if (skLen in 1..20 && 9 + skLen <= d.count) {
-            s.selKeys = (0 until skLen).map { d.u8(9 + it).toInt().toChar() }
+            bt.selKeys = (0 until skLen).map { d.u8(9 + it).toInt().toChar() }
         }
         val cnLen = d.u16(20)
-        if (cnLen > 0 && 22 + cnLen <= d.count) s.cinName = d.utf8String(22, cnLen)
-        s.binFormatVersion = d.u32(88).toInt()
-        s.codesOff = d.u32(96).toInt()
-        s.valsOff = d.u32(100).toInt()
-        s.stringsOff = d.u32(104).toInt()
-        s.charsOff = d.u32(108).toInt()
-        if (s.codesOff < 128 || s.codesOff >= s.valsOff || s.valsOff >= s.stringsOff ||
-            s.stringsOff >= s.charsOff || s.charsOff > d.count
+        if (cnLen > 0 && 22 + cnLen <= d.count) bt.cinName = d.utf8String(22, cnLen)
+        bt.binFormatVersion = d.u32(88).toInt()
+        bt.codesOff = d.u32(96).toInt()
+        bt.valsOff = d.u32(100).toInt()
+        bt.stringsOff = d.u32(104).toInt()
+        bt.charsOff = d.u32(108).toInt()
+        if (bt.codesOff < 128 || bt.codesOff >= bt.valsOff || bt.valsOff >= bt.stringsOff ||
+            bt.stringsOff >= bt.charsOff || bt.charsOff > d.count
         ) {
-            s.entryCount = 0; return
+            bt.entryCount = 0; return
         }
-        s.binData = d
+        bt.binData = d
     }
 
     // MARK: - 文字 CIN 解析（fallback + overlay）
@@ -535,16 +622,22 @@ class CINTable {
 
     // MARK: - 查詢（公開 API）
 
-    fun lookup(code: String): List<String> = snap.lookup(code)
+    fun hasModeTable(mode: InputEngine.InputMode): Boolean = snap.hasModeTable(mode)
+
+    fun lookup(code: String, mode: InputEngine.InputMode = InputEngine.InputMode.T): List<String> =
+        snap.lookup(code, mode)
 
     /// 常用語自訂組字碼的詞（不含字表候選）。撞碼時引擎把這些排在字表候選之後。
     fun shortcutLookup(code: String): List<String> = snap.shortcutLookup(code)
 
-    fun hasPrefix(prefix: String): Boolean = snap.hasPrefix(prefix)
+    fun hasPrefix(prefix: String, mode: InputEngine.InputMode = InputEngine.InputMode.T): Boolean =
+        snap.hasPrefix(prefix, mode)
 
-    fun validNextKeys(after: String): Set<Char> = snap.validNextKeys(after)
+    fun validNextKeys(after: String, mode: InputEngine.InputMode = InputEngine.InputMode.T): Set<Char> =
+        snap.validNextKeys(after, mode)
 
-    fun wildcardLookup(pattern: String): List<String> = snap.wildcardLookup(pattern)
+    fun wildcardLookup(pattern: String, mode: InputEngine.InputMode = InputEngine.InputMode.T): List<String> =
+        snap.wildcardLookup(pattern, mode)
 
     fun reverseLookup(char: String): List<String> = reverseTable[char] ?: emptyList()
 

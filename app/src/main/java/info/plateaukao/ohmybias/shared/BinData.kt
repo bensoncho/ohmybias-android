@@ -13,12 +13,21 @@ class BinData private constructor(private val buf: ByteBuffer) {
     val count: Int = buf.limit()
 
     companion object {
-        /// mmap 檔案（對應 Data(mappedIfSafe)）；失敗回 null
+        private val isWindowsHost: Boolean =
+            System.getProperty("os.name")?.startsWith("Windows", ignoreCase = true) == true
+
+        /// mmap 檔案（對應 Data(mappedIfSafe)）；失敗回 null。
+        /// Windows 本機跑 JUnit 測試時 NTFS 的 CreateFileMapping 會鎖死檔案導致測試無法覆寫或刪除 .bin，
+        /// 故在 Windows host 改走整檔讀入；Android 實機（Linux）維持零複製 mmap。
         fun mapped(path: String): BinData? = try {
-            RandomAccessFile(path, "r").use { raf ->
-                val map = raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length())
-                map.order(ByteOrder.LITTLE_ENDIAN)
-                BinData(map)
+            if (isWindowsHost) {
+                of(File(path))
+            } else {
+                RandomAccessFile(path, "r").use { raf ->
+                    val map = raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length())
+                    map.order(ByteOrder.LITTLE_ENDIAN)
+                    BinData(map)
+                }
             }
         } catch (e: Exception) {
             null
