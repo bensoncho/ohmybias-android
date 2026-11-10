@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 滿版橘黃漸層（取樣自 iOS App Icon：上 #F5B85D → 下 #E68D2C） -->
+<!-- 滿版深藍青漸層（取樣自新版蝦米圖示背景：上 #12506A → 下 #081C3C） -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
     <gradient
         android:angle="270"
-        android:startColor="#F5B85D"
-        android:endColor="#E68D2C" />
+        android:startColor="#12506A"
+        android:endColor="#081C3C" />
 </shape>

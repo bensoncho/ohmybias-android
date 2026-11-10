@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon：滿版漸層背景 + 放大的米字前景（無白邊）；monochrome 供 Android 13 主題圖示 -->
+<!-- Adaptive icon：滿版深藍青漸層背景 + 去外框蝦米鍵盤圖示前景 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@mipmap/ic_launcher_foreground" />
-    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
 </adaptive-icon>
