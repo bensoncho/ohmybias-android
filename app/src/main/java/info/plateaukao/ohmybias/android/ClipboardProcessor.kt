@@ -4,6 +4,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.icu.text.Transliterator
 import android.os.Build
+import info.plateaukao.ohmybias.keyboard.ClipboardHistory
 import info.plateaukao.ohmybias.shared.AppEnv
 import info.plateaukao.ohmybias.shared.ClipboardBridge
 import org.json.JSONObject
@@ -30,6 +31,14 @@ object ClipboardProcessor {
                 null
             }
         }
+        try {
+            cm.addPrimaryClipChangedListener {
+                val text = ClipboardBridge.plainText()
+                if (!text.isNullOrBlank()) {
+                    ClipboardHistory.onSystemClipChanged(text)
+                }
+            }
+        } catch (_: Exception) {}
         ClipboardBridge.toTraditional = { text -> transliterate("Hans-Hant", "s2t", text) }
         ClipboardBridge.toSimplified = { text -> transliterate("Hant-Hans", "t2s", text) }
     }

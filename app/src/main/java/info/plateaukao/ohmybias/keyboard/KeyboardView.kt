@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -24,21 +25,78 @@ import kotlin.math.min
 /// 含空白鍵的排 — 其他鍵用上一排單位寬、空白吃掉剩餘。
 class KeyboardView(context: Context) : ViewGroup(context) {
 
-    enum class PageKind { LETTERS, NUMBERS, SYMBOLS, ZHUYIN, NUMERIC9, SYMBOL_PANEL, EMOJI, KAOMOJIS, PHRASES }
+    enum class PageKind { LETTERS, NUMBERS, SYMBOLS, ZHUYIN, NUMERIC9, SYMBOL_PANEL, EMOJI, KAOMOJIS, PHRASES, CLIPBOARD }
 
     var onKey: ((KeyAction) -> Unit)? = null
     var onHapticDown: (() -> Unit)? = null  // 按下瞬間觸覺回饋（issue #4）— service 掛 haptic()
+    var onPasteClip: ((String) -> Unit)? = null
+    var onClearClips: (() -> Unit)? = null
 
     var currentPage = PageKind.LETTERS
     /// 中英切換改變第三排前導鍵（英/⇧）與標點 — 變更時就地重建，
     /// 不再依賴 onStartInputView 的無條件 reloadKeys 事後修正
     var isEnglishMode = false
         set(value) {
-            if (field == value) return
+            val wasShifted = isShifted || isCapsLocked
+            isShifted = false
+            isCapsLocked = false
+            lastShiftTapTime = 0L
+            if (field == value) {
+                if (wasShifted) reloadKeys()
+                return
+            }
             field = value
             reloadKeys()
         }
     var isShifted = false
+    var isCapsLocked = false
+    private var lastShiftTapTime = 0L
+
+    companion object {
+        private const val SHIFT_DOUBLE_TAP_MS = 400L
+    }
+
+    /// 處理英文 Shift 點按：
+    /// - 大寫鎖定中（⇪）→ 再按一下解除鎖定與大寫
+    /// - 單字大寫中（⬆）且在雙擊時間窗內再按一下 → 啟用大寫鎖定（⇪）
+    /// - 單字大寫中（⬆）逾雙擊時間窗再按一下 → 解除大寫
+    /// - 未大寫（⇧）→ 單按啟用單字大寫（⬆）
+    fun handleShiftTap(nowMs: Long = SystemClock.uptimeMillis()) {
+        if (isCapsLocked) {
+            isCapsLocked = false
+            isShifted = false
+            lastShiftTapTime = 0L
+        } else if (isShifted) {
+            if (nowMs - lastShiftTapTime in 0..SHIFT_DOUBLE_TAP_MS) {
+                isCapsLocked = true
+                isShifted = true
+            } else {
+                isShifted = false
+            }
+            lastShiftTapTime = 0L
+        } else {
+            isShifted = true
+            lastShiftTapTime = nowMs
+        }
+        reloadKeys()
+    }
+
+    /// 處理英文 Shift 長按：直接啟用大寫鎖定（⇪）
+    fun handleShiftLongPress() {
+        isCapsLocked = true
+        isShifted = true
+        lastShiftTapTime = 0L
+        reloadKeys()
+    }
+
+    /// 重設大寫與大寫鎖定狀態
+    fun resetShift() {
+        val changed = isShifted || isCapsLocked
+        isShifted = false
+        isCapsLocked = false
+        lastShiftTapTime = 0L
+        if (changed) reloadKeys()
+    }
     var needsInputModeSwitchKey = true
     /// Enter 鍵顯示文字（依 host app 的 imeOptions：搜尋/前往/送出…）
     var returnKeyLabel = "⏎"
@@ -53,6 +111,7 @@ class KeyboardView(context: Context) : ViewGroup(context) {
     /// 目前顯示的是工具列切過去的面板（再按一次會切回原頁）
     val isShowingToolbarPage: Boolean get() = pageBeforeToolbarToggle != null
     private var panelView: CollectionPanelView? = null
+    private var clipboardPanelView: ClipboardPanelView? = null
     /// 建鍵時的皮膚世代 — 皮膚重載後才需要重建 KeySpec（滑動開關/版面選項）
     private var builtSkinGeneration = -1
     /// 建鍵時「中文模式大寫字母」偏好值 — 在設定頁改過後回鍵盤要重建鍵面
@@ -121,6 +180,7 @@ class KeyboardView(context: Context) : ViewGroup(context) {
         keyButtons.clear()
         rowsOfButtons.clear()
         panelView = null
+        clipboardPanelView = null
         endPopup(null, false)
 
         when (currentPage) {
@@ -139,6 +199,26 @@ class KeyboardView(context: Context) : ViewGroup(context) {
                 UserPhrases.shared.reload()
                 installPanel(listOf("常用語" to UserPhrases.shared.allPhrases()), KeyboardTheme.panelKaomojiFontSize,
                              settingsAction = KeyAction.OpenUserPhrases)
+                return
+            }
+            PageKind.CLIPBOARD -> {
+                ClipboardHistory.syncFromSystem()
+                val panel = ClipboardPanelView(context)
+                panel.onPaste = { text ->
+                    onHapticDown?.invoke()
+                    onPasteClip?.invoke(text)
+                }
+                panel.onBack = {
+                    onHapticDown?.invoke()
+                    onKey?.invoke(KeyAction.Page(PageKind.LETTERS))
+                }
+                panel.onClearUnpinned = {
+                    onHapticDown?.invoke()
+                    onClearClips?.invoke()
+                }
+                addView(panel)
+                clipboardPanelView = panel
+                requestLayout()
                 return
             }
             else -> {}
@@ -184,6 +264,10 @@ class KeyboardView(context: Context) : ViewGroup(context) {
         requestLayout()
     }
 
+    fun refreshClipboardPanelIfNeeded() {
+        clipboardPanelView?.reloadCards()
+    }
+
     // MARK: - Layout
 
     private fun isSpaceKey(spec: KeySpec): Boolean = spec.action is KeyAction.Space && !spec.isGlobe
@@ -193,6 +277,10 @@ class KeyboardView(context: Context) : ViewGroup(context) {
         val h = MeasureSpec.getSize(heightMeasureSpec)
         setMeasuredDimension(w, h)
         panelView?.measure(
+            MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY),
+        )
+        clipboardPanelView?.measure(
             MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY),
         )
@@ -208,6 +296,7 @@ class KeyboardView(context: Context) : ViewGroup(context) {
         val w = (r - l).toFloat()
         val h = (b - t).toFloat()
         panelView?.layout(0, 0, w.toInt(), h.toInt())
+        clipboardPanelView?.layout(0, 0, w.toInt(), h.toInt())
         if (rowsOfButtons.isEmpty()) { layoutPopupIfNeeded(); return }
 
         // 間距縮放（設定頁「按鍵間距」）— 調小則鍵面變大、鍵與鍵更緊
@@ -273,7 +362,7 @@ class KeyboardView(context: Context) : ViewGroup(context) {
     private var gapTouchTarget: KeyButton? = null
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (panelView != null || keyButtons.isEmpty()) return false
+        if (panelView != null || clipboardPanelView != null || keyButtons.isEmpty()) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val target = nearestKey(event.x, event.y) ?: return false
@@ -388,8 +477,8 @@ class KeyboardView(context: Context) : ViewGroup(context) {
         val r1 = "qwertyuiop".map { it.toString() }
         val r2 = "asdfghjkl".map { it.toString() }
         val r3 = "zxcvbnm".map { it.toString() }
-        // 鍵面大寫：英文模式看 shift；中文模式看偏好（字根表慣用大寫）。action 一律小寫碼
-        val uppercase = if (isEnglishMode) isShifted else Prefs.uppercaseLettersInChinese
+        // 鍵面大寫：英文模式看 shift / 大寫鎖定；中文模式看偏好（字根表慣用大寫）。action 一律小寫碼
+        val uppercase = if (isEnglishMode) (isShifted || isCapsLocked) else Prefs.uppercaseLettersInChinese
         fun key(s: String): KeySpec = KeySpec(
             label = if (uppercase) s.uppercase() else s,
             action = KeyAction.Letter(s),
@@ -400,7 +489,12 @@ class KeyboardView(context: Context) : ViewGroup(context) {
         // 第三排前導鍵（sweetlime 版面）：中文模式＝「英」切換鍵（shift 位置）、英文模式＝shift
         val row3 = mutableListOf<KeySpec>()
         if (isEnglishMode) {
-            row3.add(KeySpec(if (isShifted) "⬆" else "⇧", KeyAction.Shift, isSpecial = true))
+            val shiftLabel = when {
+                isCapsLocked -> "⇪"
+                isShifted -> "⬆"
+                else -> "⇧"
+            }
+            row3.add(KeySpec(shiftLabel, KeyAction.Shift, isSpecial = true))
         } else {
             row3.add(KeySpec("英", KeyAction.ToggleLanguage, isSpecial = true))
         }
@@ -626,6 +720,14 @@ class KeyButton(
                     val lp = Runnable {
                         isInLongPress = true
                         host.showPopup(this)
+                    }
+                    longPressRunnable = lp
+                    handler2.postDelayed(lp, 400)
+                } else if (spec.action is KeyAction.Shift) {
+                    val lp = Runnable {
+                        isInLongPress = true
+                        host.onHapticDown?.invoke()
+                        host.onKey?.invoke(KeyAction.CapsLock)
                     }
                     longPressRunnable = lp
                     handler2.postDelayed(lp, 400)

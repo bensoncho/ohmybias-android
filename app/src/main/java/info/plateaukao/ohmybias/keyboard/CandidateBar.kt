@@ -2,8 +2,10 @@ package info.plateaukao.ohmybias.keyboard
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -12,6 +14,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import info.plateaukao.ohmybias.R
 import info.plateaukao.ohmybias.android.Prefs
 import info.plateaukao.ohmybias.shared.SkinSettings
 
@@ -32,6 +35,12 @@ class CandidateBar(context: Context) : FrameLayout(context) {
     var onDismissSuggestions: (() -> Unit)? = null
     /// 點組字碼標籤 — 把打的字母原樣上屏（要英文單字不要候選時）
     var onCommitComposing: (() -> Unit)? = null
+    /// 點剪貼簿快速貼上膠囊主體 — 直接貼上第一筆並標記已貼上（圖 2）
+    var onQuickPaste: ((String) -> Unit)? = null
+    /// 點剪貼簿快速貼上膠囊右側選單圖示 — 開啟多筆剪貼簿面板（圖 1）
+    var onOpenClipboardPanel: (() -> Unit)? = null
+    /// 點剪貼簿快速貼上列左側返回鍵 — 關閉快速貼上提示、回到一般工具列
+    var onDismissQuickPaste: (() -> Unit)? = null
 
     private val density = context.resources.displayMetrics.density
     private fun dp(v: Float): Int = (v * density).toInt()
@@ -40,6 +49,9 @@ class CandidateBar(context: Context) : FrameLayout(context) {
     private val scrollView = HorizontalScrollView(context)
     private val stack = LinearLayout(context)
     private val toolbarStack = LinearLayout(context)
+    private val quickPasteOverlay = FrameLayout(context)
+    private val quickPasteLabel = TextView(context)
+    private var quickPasteRawText: String? = null
     /// 右緣溢出指示 › — 候選/聯想超出可視範圍且還能往右捲時顯示，捲到底自動消失
     private val overflowHint = TextView(context)
     private var languageButton: TextView? = null
@@ -151,6 +163,96 @@ class CandidateBar(context: Context) : FrameLayout(context) {
         // 移到建構時做，電子紙上第一次出聯想才不會多一次明顯的停頓。
         repeat(11) { obtainStackView(it).visibility = View.GONE }
 
+        buildQuickPasteOverlay()
+        updateToolbarVisibility()
+    }
+
+    private fun buildQuickPasteOverlay() {
+        val accentBlue = 0xFF4C8DF6.toInt()
+        quickPasteOverlay.visibility = View.GONE
+
+        // 左側返回按鈕 [<]（同圖 2 左側方框返回圖示，點擊收起快速貼上膠囊回到工具列）
+        val dismissBtn = ImageView(context)
+        dismissBtn.setImageResource(R.drawable.ic_tb_chevron_left)
+        dismissBtn.imageTintList = ColorStateList.valueOf(KeyboardTheme.toolbarColor)
+        dismissBtn.scaleType = ImageView.ScaleType.FIT_CENTER
+        val backBg = GradientDrawable()
+        backBg.setColor(0x00000000)
+        backBg.cornerRadius = dp(6f).toFloat()
+        backBg.setStroke(dp(1.2f).coerceAtLeast(1), KeyboardTheme.toolbarColor)
+        dismissBtn.background = backBg
+        val bp = dp(3f)
+        dismissBtn.setPadding(bp, bp, bp, bp)
+        dismissBtn.contentDescription = "關閉貼上提示"
+        dismissBtn.isClickable = true
+        dismissBtn.setOnClickListener { onDismissQuickPaste?.invoke() }
+        quickPasteOverlay.addView(dismissBtn, LayoutParams(dp(26f), dp(22f)).apply {
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            leftMargin = dp(14f)
+        })
+
+        // 中央快速貼上膠囊：[ 📋 文字預覽 | ☷ ]
+        val pill = LinearLayout(context)
+        pill.orientation = LinearLayout.HORIZONTAL
+        pill.gravity = Gravity.CENTER_VERTICAL
+        val pillBg = GradientDrawable()
+        pillBg.setColor(if (KeyboardTheme.isDark) 0xFF282A2E.toInt() else 0xFFE8EAED.toInt())
+        pillBg.cornerRadius = dp(18f).toFloat()
+        pillBg.setStroke(
+            dp(1f).coerceAtLeast(1),
+            if (KeyboardTheme.isDark) 0x554C8DF6 else 0x444C8DF6
+        )
+        pill.background = pillBg
+
+        val pasteArea = LinearLayout(context)
+        pasteArea.orientation = LinearLayout.HORIZONTAL
+        pasteArea.gravity = Gravity.CENTER_VERTICAL
+        pasteArea.setPadding(dp(12f), dp(4f), dp(8f), dp(4f))
+        pasteArea.isClickable = true
+        pasteArea.setOnClickListener {
+            quickPasteRawText?.let { onQuickPaste?.invoke(it) }
+        }
+
+        val clipIcon = ImageView(context)
+        clipIcon.setImageResource(R.drawable.ic_tb_content_paste)
+        clipIcon.imageTintList = ColorStateList.valueOf(KeyboardTheme.toolbarColor)
+        clipIcon.scaleType = ImageView.ScaleType.FIT_CENTER
+        pasteArea.addView(clipIcon, LinearLayout.LayoutParams(dp(16f), dp(16f)).apply {
+            rightMargin = dp(6f)
+        })
+
+        quickPasteLabel.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f)
+        quickPasteLabel.setTextColor(KeyboardTheme.toolbarColor)
+        quickPasteLabel.maxLines = 1
+        quickPasteLabel.maxWidth = dp(190f)
+        quickPasteLabel.ellipsize = TextUtils.TruncateAt.END
+        pasteArea.addView(
+            quickPasteLabel,
+            LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT),
+        )
+        pill.addView(pasteArea, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
+
+        val listBtn = ImageView(context)
+        listBtn.setImageResource(R.drawable.ic_tb_clipboard_list)
+        listBtn.imageTintList = ColorStateList.valueOf(accentBlue)
+        listBtn.scaleType = ImageView.ScaleType.FIT_CENTER
+        listBtn.setPadding(dp(6f), dp(6f), dp(10f), dp(6f))
+        listBtn.contentDescription = "開啟剪貼簿"
+        listBtn.isClickable = true
+        listBtn.setOnClickListener { onOpenClipboardPanel?.invoke() }
+        pill.addView(listBtn, LinearLayout.LayoutParams(dp(34f), LayoutParams.MATCH_PARENT))
+
+        quickPasteOverlay.addView(pill, LayoutParams(LayoutParams.WRAP_CONTENT, dp(34f)).apply {
+            gravity = Gravity.CENTER
+        })
+        addView(quickPasteOverlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    fun setQuickPasteText(text: String?) {
+        val normalized = text?.takeIf { it.isNotBlank() }
+        if (quickPasteRawText == normalized) return
+        quickPasteRawText = normalized
+        quickPasteLabel.text = normalized?.replace(Regex("\\s+"), " ")?.trim() ?: ""
         updateToolbarVisibility()
     }
 
@@ -161,8 +263,10 @@ class CandidateBar(context: Context) : FrameLayout(context) {
     /// 開了「組字候選時保留工具列」偏好，組字候選也走同一套覆蓋（組字標籤壓住第一顆鍵）。
     private fun updateToolbarVisibility() {
         val idle = composingLabel.text.isNullOrEmpty() && activeStackViews == 0
+        val showQuickPaste = idle && !quickPasteRawText.isNullOrEmpty()
         val overlay = !idle && (Prefs.keepToolbarWithCandidates || (lastSuggestions && activeStackViews > 0))
-        toolbarStack.visibility = if (idle || overlay) View.VISIBLE else View.GONE
+        quickPasteOverlay.visibility = if (showQuickPaste) View.VISIBLE else View.GONE
+        toolbarStack.visibility = if ((idle && !showQuickPaste) || overlay) View.VISIBLE else View.GONE
         scrollView.visibility = if (idle) View.GONE else View.VISIBLE
         applyOverlayGeometry(overlay)
         updateOverflowHint()

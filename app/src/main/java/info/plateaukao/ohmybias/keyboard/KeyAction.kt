@@ -8,7 +8,8 @@ sealed class KeyAction {
     object Backspace : KeyAction()
     object Newline : KeyAction()
     object ToggleLanguage : KeyAction()                    // 中 ↔ 英
-    object Shift : KeyAction()                             // 英文模式大寫
+    object Shift : KeyAction()                             // 英文模式大寫（單按單字、連按兩下鎖定、鎖定時再按解除）
+    object CapsLock : KeyAction()                          // 英文模式大寫鎖定（Shift 長按）
     data class Page(val page: KeyboardView.PageKind) : KeyAction()
     data class ToggleToolbarPage(val page: KeyboardView.PageKind) : KeyAction()
     data class ZhuyinSymbol(val zy: String) : KeyAction()

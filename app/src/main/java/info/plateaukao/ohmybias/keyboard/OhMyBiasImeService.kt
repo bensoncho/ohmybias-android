@@ -127,6 +127,12 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         engine.setEnglishMode(Prefs.lastEnglishMode)
         warmUpReverseCache()
         Prefs.addListener(prefsListener)
+        ClipboardHistory.onChanged = {
+            handler.post {
+                syncQuickPasteBar()
+                keyboardView?.refreshClipboardPanelIfNeeded()
+            }
+        }
     }
 
     /// 反查表（查碼提示/注音同音字）整表建立成本高 — 背景預熱，
@@ -150,6 +156,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
     }
 
     override fun onDestroy() {
+        ClipboardHistory.onChanged = null
         Prefs.removeListener(prefsListener)
         super.onDestroy()
     }
@@ -519,8 +526,35 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
             haptic()
             clearSuggestions()
         }
+        bar.onQuickPaste = { text ->
+            haptic()
+            engine.handleEscape()
+            commitToEditor(text)
+            ClipboardHistory.markPasted()
+            syncQuickPasteBar()
+        }
+        bar.onOpenClipboardPanel = {
+            haptic()
+            if (showingSuggestions) clearSuggestions()
+            handleKey(KeyAction.ToggleToolbarPage(KeyboardView.PageKind.CLIPBOARD))
+        }
+        bar.onDismissQuickPaste = {
+            haptic()
+            ClipboardHistory.markPasted()
+            syncQuickPasteBar()
+        }
         kv.onKey = { action -> handleKey(action) }
         kv.onHapticDown = { haptic() }
+        kv.onPasteClip = { text ->
+            engine.handleEscape()
+            commitToEditor(text)
+            ClipboardHistory.markPasted()
+            syncQuickPasteBar()
+        }
+        kv.onClearClips = {
+            showToast("已清除未釘選紀錄", 1.2)
+            syncQuickPasteBar()
+        }
 
         rootView = root
         candidateBar = bar
@@ -562,6 +596,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
             setInputView(onCreateInputView())
         }
         requestCursorUpdatesIfFloating()
+        ClipboardHistory.syncFromSystem()
         // 密碼類欄位：暫時英文直通（不寫 Prefs.lastEnglishMode — 離開欄位就還原）
         forcedEnglishForField = isPasswordField(info)
         engine.setEnglishMode(if (forcedEnglishForField) true else Prefs.lastEnglishMode)
@@ -640,7 +675,10 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
             is KeyAction.Page -> keyboardView?.showPage(action.page)
             is KeyAction.ToggleToolbarPage -> keyboardView?.toggleToolbarPage(action.page)
             is KeyAction.Shift -> {
-                keyboardView?.let { it.isShifted = !it.isShifted; it.reloadKeys() }
+                keyboardView?.handleShiftTap()
+            }
+            is KeyAction.CapsLock -> {
+                keyboardView?.handleShiftLongPress()
             }
             is KeyAction.ZhuyinSymbol -> engine.handleZhuyinSymbol(action.zy)
             is KeyAction.ZhuyinTone -> engine.handleZhuyinTone(action.tone)
@@ -666,9 +704,12 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
             }
             is KeyAction.PasteClipboard -> {
                 engine.handleEscape()
-                val text = ClipboardBridge.plainText()
+                ClipboardHistory.syncFromSystem()
+                val text = ClipboardBridge.plainText() ?: ClipboardHistory.all().firstOrNull()?.text
                 if (!text.isNullOrEmpty()) {
                     commitToEditor(text)
+                    ClipboardHistory.markPasted()
+                    syncQuickPasteBar()
                 } else {
                     showToast("剪貼簿為空", 1.2)
                 }
@@ -727,15 +768,46 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
             // 編輯動作 — 同 sweetlime 原始實作（iOS 版因 extension API 缺失無法支援）
             is KeyAction.SelectAll -> {
                 engine.handleEscape()
-                currentInputConnection?.performContextMenuAction(android.R.id.selectAll)
+                val ic = currentInputConnection
+                val hasText = textBeforeCursor().isNotEmpty() || textAfterCursor().isNotEmpty() ||
+                    !ic?.getSelectedText(0).isNullOrEmpty()
+                if (!hasText) {
+                    showToast("無文字可全選", 1.0)
+                } else if (Build.VERSION.SDK_INT >= 34 && ic != null) {
+                    // Android 14+ (API 34+)：透過標準 InputConnection.performHandwritingGesture(SelectGesture)
+                    // 觸發目標 TextView.performHandwritingSelectGesture → Selection.setSelection(0, length)
+                    // 並呼叫 mEditor.startSelectionActionModeAsync(adjustSelection = false)，
+                    // 直接喚起系統原生浮動選取選單（含網址「開啟」、AI、剪下、複製、貼上、翻譯與雙水滴選取控點），
+                    // 且不會縮小選取範圍或造成全選閃退。若目標編輯器不支援則 fallback 為 selectAll。
+                    val gesture = android.view.inputmethod.SelectGesture.Builder()
+                        .setGranularity(android.view.inputmethod.HandwritingGesture.GRANULARITY_CHARACTER)
+                        .setSelectionArea(RectF(-100000f, -100000f, 100000f, 100000f))
+                        .build()
+                    ic.performHandwritingGesture(gesture, { it.run() }) { result ->
+                        if (result != InputConnection.HANDWRITING_GESTURE_RESULT_SUCCESS) {
+                            ic.performContextMenuAction(android.R.id.selectAll)
+                        } else {
+                            // 若超長捲動文章有超出畫面 layout 範圍的文字，待系統 ActionMode 啟動後補齊全選
+                            handler.postDelayed({
+                                if (textBeforeCursor().isNotEmpty() || textAfterCursor().isNotEmpty()) {
+                                    currentInputConnection?.performContextMenuAction(android.R.id.selectAll)
+                                }
+                            }, 100)
+                        }
+                    }
+                } else {
+                    ic?.performContextMenuAction(android.R.id.selectAll)
+                }
             }
             is KeyAction.Copy -> {
                 engine.handleEscape()
                 currentInputConnection?.performContextMenuAction(android.R.id.copy)
+                handler.postDelayed({ ClipboardHistory.syncFromSystem() }, 80)
             }
             is KeyAction.Cut -> {
                 engine.handleEscape()
                 currentInputConnection?.performContextMenuAction(android.R.id.cut)
+                handler.postDelayed({ ClipboardHistory.syncFromSystem() }, 80)
             }
             is KeyAction.Undo -> {
                 engine.handleEscape()
@@ -752,6 +824,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         }
         // ,, 指令（如 ,,ZH）可能切換引擎模式 — 每次按鍵後同步頁面
         syncPageWithEngine()
+        syncQuickPasteBar()
         updateBarModeBody()
     }
 
@@ -765,6 +838,7 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         // 密碼欄位的暫時英文是欄位性質，不是使用者偏好 — 不記
         if (!forcedEnglishForField) Prefs.lastEnglishMode = engine.isEnglishMode
         refreshIdleBar()
+        updateBarModeBody()
     }
 
     /// Ctrl(+Shift)+按鍵組合送給編輯器（復原/重做 — EditText 內建 undo manager 走此路徑）
@@ -829,11 +903,12 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
 
     private fun handleLetterKey(ch: String) {
         if (engine.isEnglishMode) {
-            val shifted = keyboardView?.isShifted == true
+            val kv = keyboardView
+            val shifted = kv?.isShifted == true || kv?.isCapsLocked == true
             val out = if (shifted) ch.uppercase() else ch
-            if (shifted) {
-                keyboardView?.isShifted = false
-                keyboardView?.reloadKeys()
+            if (kv != null && kv.isShifted && !kv.isCapsLocked) {
+                kv.isShifted = false
+                kv.reloadKeys()
             }
             commitToEditor(out)
             return
@@ -906,6 +981,14 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
         setBarComposing("")
         setBarCandidates(emptyList(), suggestions = false)
         candidateBar?.setEnglishMode(engine.isEnglishMode)
+        syncQuickPasteBar()
+    }
+
+    private fun syncQuickPasteBar() {
+        val showOnCurrentPage = keyboardView?.currentPage != KeyboardView.PageKind.CLIPBOARD
+        candidateBar?.setQuickPasteText(
+            if (showOnCurrentPage) ClipboardHistory.unpastedText() else null
+        )
     }
 
     /// 候選列與浮動氣泡吃同一份狀態 — 所有更新都經這兩個入口
@@ -1077,6 +1160,8 @@ class OhMyBiasImeService : InputMethodService(), InputEngineDelegate, HardwareKe
 
     override fun engineDidPasteText(text: String) {
         commitToEditor(text)
+        ClipboardHistory.markPasted()
+        syncQuickPasteBar()
     }
 
     // MARK: - Zhuyin page sync

@@ -221,8 +221,8 @@ class MainActivity : Activity() {
             Prefs.hardKeyboardMode,
             listOf(
                 Prefs.HW_MODE_KEYPAD to "照常顯示軟體鍵盤",
-                Prefs.HW_MODE_FLOATING to "只在游標旁浮出組字／候選氣泡",
-                Prefs.HW_MODE_BAR to "螢幕底部固定一條候選列",
+                Prefs.HW_MODE_FLOATING to "只在游標旁浮出組字／候選氣泡（隱藏按鍵區）",
+                Prefs.HW_MODE_BAR to "螢幕底部固定一條候選列（隱藏按鍵區）",
             ),
         ) { Prefs.hardKeyboardMode = it })
         root.addView(collapsible(
@@ -238,7 +238,20 @@ class MainActivity : Activity() {
 
         // ── 測試輸入 ──
         root.addView(sectionTitle("測試輸入"))
-        val testInput = EditText(this)
+        val testInput = object : EditText(this) {
+            override fun onTextContextMenuItem(id: Int): Boolean {
+                if (id == android.R.id.selectAll && !hasSelection() && !text.isNullOrEmpty()) {
+                    val args = Bundle().apply {
+                        putInt(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                        putInt(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, text.length)
+                    }
+                    if (performAccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION, args)) {
+                        return true
+                    }
+                }
+                return super.onTextContextMenuItem(id)
+            }
+        }
         testInput.hint = "在此測試鍵盤輸入"
         testInput.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18f)
         root.addView(testInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))

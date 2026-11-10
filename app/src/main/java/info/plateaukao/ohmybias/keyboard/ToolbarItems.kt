@@ -39,6 +39,7 @@ object ToolbarItems {
         3 -> Item(id, "中", "中英切換", KeyAction.ToggleLanguage, isLanguage = true)
         4 -> Item(id, "簡", "簡繁切換", KeyAction.ToggleSimpTrad)
         5 -> Item(id, "♥︎", "常用語", KeyAction.ToggleToolbarPage(KeyboardView.PageKind.PHRASES), iconRes = R.drawable.ic_tb_favorite)
+        6 -> Item(id, "貼", "剪貼簿", KeyAction.ToggleToolbarPage(KeyboardView.PageKind.CLIPBOARD), iconRes = R.drawable.ic_tb_content_paste)
         7 -> Item(id, "符", "符號面板", KeyAction.ToggleToolbarPage(KeyboardView.PageKind.SYMBOL_PANEL), iconRes = R.drawable.ic_tb_emoji_symbols)
         8 -> Item(id, "☺︎", "Emoji", KeyAction.ToggleToolbarPage(KeyboardView.PageKind.EMOJI), iconRes = R.drawable.ic_tb_mood)
         9 -> {
@@ -49,7 +50,7 @@ object ToolbarItems {
         10 -> Item(id, "全", "全選", KeyAction.SelectAll, iconRes = R.drawable.ic_tb_select_all)
         11 -> Item(id, "複", "複製", KeyAction.Copy, iconRes = R.drawable.ic_tb_content_copy)
         12 -> Item(id, "剪", "剪下", KeyAction.Cut, iconRes = R.drawable.ic_tb_content_cut)
-        13 -> Item(id, "貼", "貼上", KeyAction.PasteClipboard, iconRes = R.drawable.ic_tb_content_paste)
+        13 -> Item(id, "貼", "剪貼簿", KeyAction.ToggleToolbarPage(KeyboardView.PageKind.CLIPBOARD), iconRes = R.drawable.ic_tb_content_paste)
         14 -> Item(id, "↶", "復原", KeyAction.Undo, iconRes = R.drawable.ic_tb_undo)
         15 -> Item(id, "↷", "重做", KeyAction.Redo, iconRes = R.drawable.ic_tb_redo)
         16 -> Item(id, "←", "游標左移", KeyAction.CursorLeft, iconRes = R.drawable.ic_tb_chevron_left)
