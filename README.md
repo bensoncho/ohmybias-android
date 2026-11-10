@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/src/main/play/listings/zh-TW/graphics/icon/1.png" width="128" alt="OhMyBias 米">
+  <img src="app/src/main/play/listings/zh-TW/graphics/icon/1.png" width="240" style="border-radius: 20%;" alt="OhMyBias 米">
 </p>
 
 # OhMyBias 米 Android
