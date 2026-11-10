@@ -456,17 +456,27 @@ class CINTable {
             }
         }
         // 2b. 各輸入模式專屬 .bin（匯入 liu-uni2/3/4.tab 時產出）
+        val tsBinFile = File(AppEnv.sharedDir, "liu-ts.bin")
+        if (tsBinFile.exists()) {
+            val bt = BinTable()
+            loadBin(tsBinFile.path, bt)
+            if (bt.entryCount > 0) s.tsBin = bt
+        }
         val sBinFile = File(AppEnv.sharedDir, "liu-s.bin")
         if (sBinFile.exists()) {
             val bt = BinTable()
             loadBin(sBinFile.path, bt)
             if (bt.entryCount > 0) s.simpBin = bt
         }
-        val tsBinFile = File(AppEnv.sharedDir, "liu-ts.bin")
-        if (tsBinFile.exists()) {
-            val bt = BinTable()
-            loadBin(tsBinFile.path, bt)
-            if (bt.entryCount > 0) s.tsBin = bt
+        // 自動修正舊版 liu-s.bin（將 liu-uni2 排在 liu-uni3 前面導致 a=夺、qd=替、wr=刘、ow=响）：
+        // 若 liu-ts.bin（以 liu-uni3 優先）已存在，直接升級沿用，免重新匯入即可生效
+        val curSimp = s.simpBin
+        val curTs = s.tsBin
+        if (curSimp != null && curTs != null &&
+            curSimp.lookup("a").firstOrNull() == "夺" &&
+            curTs.lookup("a").firstOrNull() == "对"
+        ) {
+            s.simpBin = curTs
         }
         val jBinFile = File(AppEnv.sharedDir, "liu-j.bin")
         if (jBinFile.exists()) {

@@ -154,16 +154,20 @@ object CINCompiler {
         val tsPairs = tabsByKind[TabKind.TS] ?: emptyList()
         val jPairs = tabsByKind[TabKind.J] ?: emptyList()
 
-        // 1. 主表（繁中模式 T）：以 liu-uni.tab 優先，再補齊 S / J 中獨有的字碼（不混入 TS 的「繁碼出簡字」以免污染繁體單一候選）
+        // 1. 主表（繁中模式 T）：以 liu-uni.tab 優先；僅對 liu-uni.tab 未收錄的獨有字碼補齊其他表
+        //    （避免把 liu-uni2.tab 大陸異義簡碼如 qd=替/狱、wr=刘、ow=响 混入繁體既有字碼）
         val mainList = ArrayList<Pair<String, String>>()
         if (tPairs.isNotEmpty()) {
+            val tCodes = tPairs.mapTo(HashSet(tPairs.size)) { it.first }
             mainList.addAll(tPairs)
-            mainList.addAll(sPairs)
-            mainList.addAll(jPairs)
-            if (sPairs.isEmpty()) mainList.addAll(tsPairs)
+            for (p in sPairs) if (p.first !in tCodes) mainList.add(p)
+            for (p in jPairs) if (p.first !in tCodes) mainList.add(p)
+            if (sPairs.isEmpty()) {
+                for (p in tsPairs) if (p.first !in tCodes) mainList.add(p)
+            }
         } else {
-            mainList.addAll(sPairs)
             mainList.addAll(tsPairs)
+            mainList.addAll(sPairs)
             mainList.addAll(jPairs)
         }
         mainList.addAll(cinPairs)
@@ -186,13 +190,17 @@ object CINCompiler {
             val count = compilePairs(mainList, binTmp.path, cname, selkeys)
             if (count <= 0) return 0
 
-            // 2. 簡中模式（,,S）專屬字表：以 liu-uni2.tab（S）為第一優先，次接 liu-uni3.tab（TS）與主表
-            val hasSimpTab = sPairs.isNotEmpty() || tsPairs.isNotEmpty()
+            // 2. 簡中模式（,,S）專屬字表：
+            //    官方 liu-uni3.tab（30,945 筆、22,778 碼）與 liu-uni.tab 擁有完全相同的 22,778 個字碼，
+            //    同時包含標準嘸蝦米兩碼簡碼（qd=体、wr=测、ow=选、a=对、td=替、wd=响）與簡體字形拆碼（tua=树、pte=体、srw=选、opno=响）；
+            //    而 liu-uni2.tab（15,112 筆）將兩碼簡碼改為大陸簡碼（qd=替、wr=刘、ow=响、a=夺、td=动、wd=潜）。
+            //    故 ,,S 以 liu-uni3.tab（TS）為第一優先，再接 liu-uni2.tab（S）補齊大陸特有拆碼。
+            val hasSimpTab = tsPairs.isNotEmpty() || sPairs.isNotEmpty()
             if (hasSimpTab) {
-                val simpList = ArrayList<Pair<String, String>>(sPairs.size + tsPairs.size + tPairs.size)
-                simpList.addAll(sPairs)
+                val simpList = ArrayList<Pair<String, String>>(tsPairs.size + sPairs.size + tPairs.size)
                 simpList.addAll(tsPairs)
-                simpList.addAll(tPairs)
+                simpList.addAll(sPairs)
+                if (tsPairs.isEmpty()) simpList.addAll(tPairs)
                 simpList.addAll(cinPairs)
                 if (compilePairs(simpList, sBinTmp.path, cname, selkeys) <= 0) return 0
             }
@@ -200,10 +208,9 @@ object CINCompiler {
             // 3. 繁→簡／台式簡體模式（,,TS）專屬字表：以 liu-uni3.tab（TS）為第一優先
             val hasTsTab = tsPairs.isNotEmpty()
             if (hasTsTab) {
-                val tsList = ArrayList<Pair<String, String>>(tsPairs.size + sPairs.size + tPairs.size)
+                val tsList = ArrayList<Pair<String, String>>(tsPairs.size + sPairs.size)
                 tsList.addAll(tsPairs)
                 tsList.addAll(sPairs)
-                tsList.addAll(tPairs)
                 tsList.addAll(cinPairs)
                 if (compilePairs(tsList, tsBinTmp.path, cname, selkeys) <= 0) return 0
             }

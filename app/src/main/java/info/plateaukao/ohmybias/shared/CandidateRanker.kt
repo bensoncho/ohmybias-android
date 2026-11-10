@@ -75,25 +75,39 @@ class CandidateRanker(
                 }
             }
             InputEngine.InputMode.S -> {
-                val t2s = cinTable.t2s
-                candidates = candidates.filter { ch ->
-                    val s = t2s[ch] ?: return@filter true
-                    s == ch
-                }
-                // 若尚未匯入獨立的簡體字表（liu-s.bin），主字表為繁體排序（如 qd: 1.替 2.体、tua: 1.杈 2.树），
-                // 將專屬於簡體的字（s2t 有對應繁體字者，如「体→體」「树→樹」）排在繁簡共用字前面
-                if (!cinTable.hasModeTable(InputEngine.InputMode.S) && candidates.size > 1) {
-                    val s2t = cinTable.s2t
-                    if (s2t.isNotEmpty()) {
-                        val simpOnly = ArrayList<String>(candidates.size)
-                        val shared = ArrayList<String>(candidates.size)
-                        for (ch in candidates) {
-                            val t = s2t[ch]
-                            if (t != null && t != ch) simpOnly.add(ch) else shared.add(ch)
+                if (!cinTable.hasModeTable(InputEngine.InputMode.S)) {
+                    // 未載入獨立簡體表（liu-s.bin）時，主字表以繁體為首（如 qd: 體、wr: 測、ow: 選、tua: 樹），
+                    // 直接將候選字經 t2s 轉為簡體並去重，保留主字表原本的第一順位（體→体、測→测、選→选、樹→树），
+                    // 避免舊版 filter 直接把第一順位繁體字刪掉而讓次順位異義字（替、刘、响、杈）頂上來
+                    val t2s = cinTable.t2s
+                    val firstRaw = candidates.firstOrNull()
+                    val firstWasTrad = firstRaw != null && t2s[firstRaw] != null && t2s[firstRaw] != firstRaw
+                    val seen = HashSet<String>()
+                    candidates = candidates.mapNotNull { ch ->
+                        val s = cinTable.convert(ch, t2s)
+                        if (seen.add(s)) s else null
+                    }
+                    // 若原碼首字並非繁體字（例如單一 .cin 把繁簡共用字「替」排在簡體專用字「体」前面），則將簡體專用字提前
+                    if (!firstWasTrad && candidates.size > 1) {
+                        val s2t = cinTable.s2t
+                        if (s2t.isNotEmpty()) {
+                            val simpOnly = ArrayList<String>(candidates.size)
+                            val shared = ArrayList<String>(candidates.size)
+                            for (ch in candidates) {
+                                val t = s2t[ch]
+                                if (t != null && t != ch) simpOnly.add(ch) else shared.add(ch)
+                            }
+                            if (simpOnly.isNotEmpty() && shared.isNotEmpty()) {
+                                candidates = simpOnly + shared
+                            }
                         }
-                        if (simpOnly.isNotEmpty() && shared.isNotEmpty()) {
-                            candidates = simpOnly + shared
-                        }
+                    }
+                } else if (!cinTable.hasModeTable(InputEngine.InputMode.TS)) {
+                    // 僅匯入 liu-uni2.tab（無 liu-uni3.tab）時，尾端可能帶主表繁體 fallback，轉簡去重
+                    val seen = HashSet<String>()
+                    candidates = candidates.mapNotNull { ch ->
+                        val s = cinTable.convert(ch, cinTable.t2s)
+                        if (seen.add(s)) s else null
                     }
                 }
             }

@@ -229,37 +229,43 @@ class CINCompilerTest {
         }
     }
 
-    /// 測試同時匯入 liu-uni.tab / liu-uni2.tab / liu-uni3.tab / liu-uni4.tab 時，
-    /// 各輸入模式（,,T / ,,S / ,,TS / ,,J）皆以該模式對應字表的候選順序為主：
-    /// - 繁體 ,,T：qd → 1.替 2.体，tua → 1.杈 2.树，bnu → 1.體（不受 liu-uni3.tab 台式簡體影響）
-    /// - 簡體 ,,S：qd → 1.体 2.替，tua → 1.树 2.杈
-    /// - 台式簡體 ,,TS：bnu → 1.体，tqb → 1.树
-    /// - 日文 ,,J：a → 1.対
+    /// 測試同時匯入 liu-uni.tab / liu-uni2.tab / liu-uni3.tab / liu-uni4.tab（完全比照官方 Windows .tab 實機內容結構）：
+    /// - liu-uni.tab (T)：a=對、qd=體、tua=[樹, 杈]、wr=測、ow=選
+    /// - liu-uni2.tab (S，大陸簡碼表)：a=夺、qd=[替, 狱]、tua=[树, 杈]、wr=[刘, 测]、ow=响、abv=锁
+    /// - liu-uni3.tab (TS，完整簡體表)：a=对、qd=体、tua=[树, 杈]、wr=测、ow=选
+    /// - liu-uni4.tab (J)：a=対、qd=體、tua=樹、wr=測、ow=選
+    /// 驗證：
+    /// 1. 繁體模式 ,,T：qd → [體]、tua → [樹, 杈]、wr → [測]、ow → [選]（不被 liu-uni2 異義簡碼污染）
+    /// 2. 簡體模式 ,,S：qd 首選「体」（非「替」）、tua 首選「树」（非「杈」）、wr 首選「测」（非「刘」）、ow 首選「选」（非「响」），且可打 liu-uni2 獨有碼 abv → [锁]
+    /// 3. 即使未載入 liu-s.bin（僅有主表 liu.bin），,,S 模式仍可透過 t2s 轉換讓 qd=体、tua=树、wr=测、ow=选 排第一
     @Test
     fun modeSpecificTabOrderingForSimplifiedAndTraditional() {
         val tabT = buildSyntheticTab(listOf(
             "a" to "對",
-            "bnu" to "體",
-            "tqb" to "樹",
-            "qd" to "替",
-            "qd" to "体",
+            "qd" to "體",
+            "tua" to "樹",
             "tua" to "杈",
-            "tua" to "树",
+            "wr" to "測",
+            "ow" to "選",
         ))
         val tabS = buildSyntheticTab(listOf(
             "a" to "夺",
-            "qd" to "体",
             "qd" to "替",
+            "qd" to "狱",
             "tua" to "树",
             "tua" to "杈",
+            "wr" to "刘",
+            "wr" to "测",
+            "ow" to "响",
+            "abv" to "锁",
         ))
         val tabTS = buildSyntheticTab(listOf(
             "a" to "对",
-            "bnu" to "体",
             "qd" to "体",
-            "qd" to "替",
-            "tqb" to "树",
             "tua" to "树",
+            "tua" to "杈",
+            "wr" to "测",
+            "ow" to "选",
         ))
         val tabJ = buildSyntheticTab(listOf(
             "a" to "対",
@@ -288,30 +294,37 @@ class CINCompilerTest {
             assertTrue("應載入台式簡體專屬表 liu-ts.bin", table.hasModeTable(InputEngine.InputMode.TS))
             assertTrue("應載入日文專屬表 liu-j.bin", table.hasModeTable(InputEngine.InputMode.J))
 
-            // 1. 繁體模式（預設 ,,T）：以 liu-uni.tab 為主，且 bnu 唯一候選仍為「體」
-            assertEquals(listOf("替", "体"), table.lookup("qd", InputEngine.InputMode.T))
-            assertEquals(listOf("杈", "树"), table.lookup("tua", InputEngine.InputMode.T))
-            assertEquals(listOf("體"), table.lookup("bnu", InputEngine.InputMode.T))
+            // 1. 繁體模式（預設 ,,T）：以 liu-uni.tab 為主，單一候選不被 liu-uni2/3 污染
+            assertEquals(listOf("體"), table.lookup("qd", InputEngine.InputMode.T))
+            assertEquals(listOf("樹", "杈"), table.lookup("tua", InputEngine.InputMode.T))
+            assertEquals(listOf("測"), table.lookup("wr", InputEngine.InputMode.T))
+            assertEquals(listOf("選"), table.lookup("ow", InputEngine.InputMode.T))
 
-            // 2. 簡體模式（,,S）：以 liu-uni2.tab 為主，qd 首選「体」、tua 首選「树」
+            // 2. 簡體模式（,,S）：qd 首選「体」、tua 首選「树」、wr 首選「测」、ow 首選「选」，並包含 liu-uni2 獨有碼 abv=锁
             val ranker = CandidateRanker()
-            val sQd = ranker.rank(
-                table.lookup("qd", InputEngine.InputMode.S),
-                "qd", InputEngine.InputMode.S, table, PinnedOrder(),
+            fun rankS(code: String) = ranker.rank(
+                table.lookup(code, InputEngine.InputMode.S),
+                code, InputEngine.InputMode.S, table, PinnedOrder(),
             )
-            val sTua = ranker.rank(
-                table.lookup("tua", InputEngine.InputMode.S),
-                "tua", InputEngine.InputMode.S, table, PinnedOrder(),
-            )
-            assertEquals("簡體模式 qd 第一候選應為「体」", listOf("体", "替"), sQd)
-            assertEquals("簡體模式 tua 第一候選應為「树」", listOf("树", "杈"), sTua)
+            assertEquals("簡體模式 qd 第一候選應為「体」", "体", rankS("qd").first())
+            assertEquals("簡體模式 tua 第一候選應為「树」", listOf("树", "杈"), rankS("tua"))
+            assertEquals("簡體模式 wr 第一候選應為「测」", listOf("测", "刘"), rankS("wr"))
+            assertEquals("簡體模式 ow 第一候選應為「选」", listOf("选", "响"), rankS("ow"))
+            assertEquals("簡體模式應支援 liu-uni2 獨有拆碼 abv=锁", listOf("锁"), rankS("abv"))
 
-            // 3. 台式簡體模式（,,TS）：以 liu-uni3.tab 為主
-            val tsBnu = ranker.rank(
-                table.lookup("bnu", InputEngine.InputMode.TS),
-                "bnu", InputEngine.InputMode.TS, table, PinnedOrder(),
+            // 3. 模擬未產生 liu-s.bin（僅有主表 liu.bin）時，,,S 仍應將首選繁體轉為對應簡體（體→体、樹→树、測→测、選→选）
+            File(shared, "liu-s.bin").delete()
+            File(shared, "liu-ts.bin").delete()
+            val fallbackTable = CINTable()
+            fallbackTable.reload()
+            fun rankFallbackS(code: String) = ranker.rank(
+                fallbackTable.lookup(code, InputEngine.InputMode.S),
+                code, InputEngine.InputMode.S, fallbackTable, PinnedOrder(),
             )
-            assertEquals(listOf("体"), tsBnu)
+            assertEquals("無 liu-s.bin 時 qd 首選仍應為「体」", "体", rankFallbackS("qd").first())
+            assertEquals("無 liu-s.bin 時 tua 仍應為 [树, 杈]", listOf("树", "杈"), rankFallbackS("tua"))
+            assertEquals("無 liu-s.bin 時 wr 首選仍應為「测」", "测", rankFallbackS("wr").first())
+            assertEquals("無 liu-s.bin 時 ow 首選仍應為「选」", "选", rankFallbackS("ow").first())
 
             // 4. 日文模式（,,J）：以 liu-uni4.tab 為主
             assertEquals("対", table.lookup("a", InputEngine.InputMode.J).first())
